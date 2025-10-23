@@ -1,17 +1,15 @@
-import sys
+﻿import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QTreeView, QHeaderView, QMessageBox, QFileDialog,
-    QSizePolicy, QAbstractItemView,
+    QSizePolicy, QAbstractItemView, QToolButton, QStyle,
 )
 from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush
-from PyQt6.QtCore import Qt, QTimer
-
+from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-
 from . import config
 from .repository import (
     load_budgetyear_map,
@@ -21,7 +19,6 @@ from .repository import (
     upsert_budget_entry,
 )
 from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView
-
 CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
 PERIOD_COLUMN_WIDTH = 60     # width for the period column
 NUMERIC_COLUMN_WIDTH = 80    # width for budget/actual numeric columns (adjust to taste)
@@ -151,6 +148,25 @@ class BudgetApp(QWidget):
         self.save_btn = QPushButton("Save Budgets")
         self.save_btn.clicked.connect(self.save_budgets)
         top.addWidget(self.save_btn)
+        # Expand/Collapse all main categories
+        self.expand_all_btn = QToolButton()
+        self.expand_all_btn.setAutoRaise(True)
+        self.expand_all_btn.setToolTip("Expand all categories")
+        self.expand_all_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.expand_all_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarUnshadeButton))
+        self.expand_all_btn.setIconSize(QSize(14, 14))
+        self.expand_all_btn.setFixedSize(QSize(22, 22))
+        self.expand_all_btn.clicked.connect(self.expand_all_main)
+        top.addWidget(self.expand_all_btn)
+        self.collapse_all_btn = QToolButton()
+        self.collapse_all_btn.setAutoRaise(True)
+        self.collapse_all_btn.setToolTip("Collapse all categories")
+        self.collapse_all_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.collapse_all_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarShadeButton))
+        self.collapse_all_btn.setIconSize(QSize(14, 14))
+        self.collapse_all_btn.setFixedSize(QSize(22, 22))
+        self.collapse_all_btn.clicked.connect(self.collapse_all_main)
+        top.addWidget(self.collapse_all_btn)
         layout.addLayout(top)
 
         self.figure = Figure(figsize=(6, 2.2))
@@ -179,6 +195,8 @@ class BudgetApp(QWidget):
         self.period_delegate = PeriodDelegate()
         self.budget_button_delegate = ButtonDelegate(self.view, self.apply_actual_to_budget)
         self.total_divider_delegate = DividerDelegate(self.view)
+        self._collapsed_main: set[int] = set()
+        self.view.doubleClicked.connect(self.on_view_double_clicked)
         self.current_headers: list[str] = []
         self.apply_light_theme()
         self.refresh()
@@ -479,6 +497,7 @@ class BudgetApp(QWidget):
         self._update_summary_header(header_names)
         self._apply_column_widths(header_names)
         self.view.expandAll()
+        self._apply_main_collapse_states()
         try:
             self.model.itemChanged.disconnect()
         except Exception:
@@ -852,6 +871,82 @@ class BudgetApp(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+    def on_view_double_clicked(self, index):
+        try:
+            first = index.siblingAtColumn(0)
+        except Exception:
+            first = index
+        item = self.model.itemFromIndex(first)
+        if not item:
+            return
+        meta = item.data(Qt.ItemDataRole.UserRole)
+        if not meta or meta[0] != "category_label":
+            return
+        depth = meta[2] or 0
+        if depth != 0:
+            return
+        try:
+            cid = int(meta[1])
+        except Exception:
+            cid = meta[1]
+        if cid in self._collapsed_main:
+            self._collapsed_main.remove(cid)
+        else:
+            self._collapsed_main.add(cid)
+        self._apply_main_collapse_states()
+
+    def _apply_main_collapse_states(self):
+        root = self.model.invisibleRootItem()
+        for r in range(root.rowCount()):
+            cat_item = root.child(r, 0)
+            if not cat_item:
+                continue
+            meta = cat_item.data(Qt.ItemDataRole.UserRole)
+            if not meta or meta[0] != "category_label":
+                continue
+            depth = meta[2] or 0
+            if depth != 0:
+                continue
+            try:
+                cid = int(meta[1])
+            except Exception:
+                cid = meta[1]
+            collapse = cid in self._collapsed_main
+            self.view.setExpanded(cat_item.index(), not collapse)
+            self._hide_until_next_main(r, collapse)
+
+    def _hide_until_next_main(self, start_row: int, hide: bool):
+        root = self.model.invisibleRootItem()
+        for rr in range(start_row + 1, root.rowCount()):
+            next_item = root.child(rr, 0)
+            if not next_item:
+                continue
+            meta = next_item.data(Qt.ItemDataRole.UserRole)
+            if meta and meta[0] == "category_label" and (meta[2] or 0) == 0:
+                break
+            self.view.setRowHidden(rr, QModelIndex(), hide)
+
+    def expand_all_main(self):
+        self._collapsed_main.clear()
+        self._apply_main_collapse_states()
+
+    def collapse_all_main(self):
+        root = self.model.invisibleRootItem()
+        ids = set()
+        for r in range(root.rowCount()):
+            item = root.child(r, 0)
+            if not item:
+                continue
+            meta = item.data(Qt.ItemDataRole.UserRole)
+            if meta and meta[0] == "category_label" and (meta[2] or 0) == 0:
+                try:
+                    cid = int(meta[1])
+                except Exception:
+                    cid = meta[1]
+                ids.add(cid)
+        self._collapsed_main = ids
+        self._apply_main_collapse_states()
+
     def select_db(self):
         file, _ = QFileDialog.getOpenFileName(
             self, "Select DB", str(Path.home()), "SQLite (*.mmb *.db)"
@@ -872,3 +967,66 @@ def main():
     w = BudgetApp()
     w.show()
     sys.exit(app.exec())
+
+
+
+    def on_view_double_clicked(self, index):
+        try:
+            first = index.siblingAtColumn(0)
+        except Exception:
+            first = index
+        item = self.model.itemFromIndex(first)
+        if not item:
+            return
+        meta = item.data(Qt.ItemDataRole.UserRole)
+        if not meta or meta[0] != "category_label":
+            return
+        depth = meta[2] or 0
+        if depth != 0:
+            return
+        try:
+            cid = int(meta[1])
+        except Exception:
+            cid = meta[1]
+        if cid in self._collapsed_main:
+            self._collapsed_main.remove(cid)
+        else:
+            self._collapsed_main.add(cid)
+        self._apply_main_collapse_states()
+
+    def _apply_main_collapse_states(self):
+        root = self.model.invisibleRootItem()
+        for r in range(root.rowCount()):
+            cat_item = root.child(r, 0)
+            if not cat_item:
+                continue
+            meta = cat_item.data(Qt.ItemDataRole.UserRole)
+            if not meta or meta[0] != "category_label":
+                continue
+            depth = meta[2] or 0
+            if depth != 0:
+                continue
+            try:
+                cid = int(meta[1])
+            except Exception:
+                cid = meta[1]
+            collapse = cid in self._collapsed_main
+            self.view.setExpanded(cat_item.index(), not collapse)
+            self._hide_until_next_main(r, collapse)
+
+    def _hide_until_next_main(self, start_row: int, hide: bool):
+        root = self.model.invisibleRootItem()
+        for rr in range(start_row + 1, root.rowCount()):
+            next_item = root.child(rr, 0)
+            if not next_item:
+                continue
+            meta = next_item.data(Qt.ItemDataRole.UserRole)
+            if meta and meta[0] == "category_label" and (meta[2] or 0) == 0:
+                break
+            self.view.setRowHidden(rr, QModelIndex(), hide)
+
+
+
+
+
+
