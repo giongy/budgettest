@@ -20,7 +20,7 @@ from .repository import (
     load_budgets_for_year,
     upsert_budget_entry,
 )
-from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate
+from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView
 
 CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
 PERIOD_COLUMN_WIDTH = 60     # width for the period column
@@ -160,6 +160,8 @@ class BudgetApp(QWidget):
         layout.addWidget(self.canvas)
 
         self.view = QTreeView()
+        self.summary_header = SummaryHeaderView(self.view)
+        self.view.setHeader(self.summary_header)
         self.model = QStandardItemModel()
         self.view.setModel(self.model)
         self.view.setEditTriggers(
@@ -177,6 +179,7 @@ class BudgetApp(QWidget):
         self.period_delegate = PeriodDelegate()
         self.budget_button_delegate = ButtonDelegate(self.view, self.apply_actual_to_budget)
         self.total_divider_delegate = DividerDelegate(self.view)
+        self.current_headers: list[str] = []
         self.apply_light_theme()
         self.refresh()
 
@@ -192,6 +195,71 @@ class BudgetApp(QWidget):
                 width = NUMERIC_COLUMN_WIDTH
             header.resizeSection(col, width)
             self.view.setColumnWidth(col, width)
+
+    def _compute_summary_budget_totals(self, header_names: list[str]) -> dict[int, float]:
+        totals: dict[int, float] = {}
+        root = self.model.invisibleRootItem()
+        column_count = self.model.columnCount()
+        for r in range(root.rowCount()):
+            category_item = root.child(r, 0)
+            if not category_item:
+                continue
+            budget_row_idx = None
+            for rr in range(category_item.rowCount()):
+                label_item = category_item.child(rr, 0)
+                if label_item and label_item.text() == "Budget":
+                    budget_row_idx = rr
+                    break
+            if budget_row_idx is None:
+                continue
+            for col in range(1, column_count):
+                if col >= len(header_names):
+                    continue
+                if header_names[col] == "Period":
+                    continue
+                cell = category_item.child(budget_row_idx, col)
+                if not cell:
+                    continue
+                txt = (cell.text() or "").replace(" ", "").replace(",", "")
+                try:
+                    val = float(txt) if txt else 0.0
+                except ValueError:
+                    val = 0.0
+                totals[col] = totals.get(col, 0.0) + val
+        return totals
+
+    def _update_summary_header(self, header_names: list[str] | None = None):
+        if header_names is None:
+            header_names = self.current_headers
+        if not header_names:
+            self.summary_header.set_summary({})
+            return
+        totals = self._compute_summary_budget_totals(header_names)
+        summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] = {}
+        summary[0] = (
+            "Totale Budget",
+            QBrush(QColor("#E8EAED")),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        for col in range(1, len(header_names)):
+            if header_names[col] == "Period":
+                continue
+            val = totals.get(col, 0.0)
+            summary[col] = (
+                format_diff_value(val),
+                diff_background(val),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+        # Ensure TOTAL column gets included if it lies beyond header_names length due to model column
+        total_col_index = self.model.columnCount() - 1
+        if total_col_index not in summary:
+            val = totals.get(total_col_index, 0.0)
+            summary[total_col_index] = (
+                format_diff_value(val),
+                diff_background(val),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+        self.summary_header.set_summary(summary)
 
     def apply_light_theme(self):
         self.setStyleSheet(
@@ -223,8 +291,10 @@ class BudgetApp(QWidget):
                 header_names.append(name)
                 header_ids.append(bid)
         header_names.append("TOTAL")
+        self.current_headers = header_names[:]
 
         self.model.clear()
+        self.summary_header.set_summary({})
         self.model.setHorizontalHeaderLabels(header_names)
         for col in range(self.model.columnCount()):
             self.view.setItemDelegateForColumn(col, self.default_delegate)
@@ -406,10 +476,9 @@ class BudgetApp(QWidget):
         for r in self.root_ids:
             add_category(r)
 
+        self._update_summary_header(header_names)
+        self._apply_column_widths(header_names)
         self.view.expandAll()
-        header = self.view.header()
-        for col in range(1, self.model.columnCount()):
-            header.resizeSection(col, 250)
         try:
             self.model.itemChanged.disconnect()
         except Exception:
@@ -637,6 +706,7 @@ class BudgetApp(QWidget):
                     total_act += actual_map.get((cid, bid), 0.0)
                 self.category_totals[cid] = {"actual": total_act, "budget": display_total}
                 self.update_summary_chart()
+            self._update_summary_header()
         finally:
             self._recalc_guard = False
 

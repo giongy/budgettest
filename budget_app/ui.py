@@ -1,4 +1,4 @@
-﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication
+﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader
 from pathlib import Path
 
 from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen
@@ -186,6 +186,79 @@ class DividerDelegate(QStyledItemDelegate):
         x = option.rect.left()
         painter.drawLine(x, top, x, bottom)
         painter.restore()
+
+
+class SummaryHeaderView(QHeaderView):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] = {}
+        self._summary_height = 18
+        self._summary_font = QFont("Segoe UI", 8)
+        self._summary_font.setBold(True)
+        self.setSectionsClickable(True)
+
+    def set_summary(self, summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] | None):
+        self._summary = summary or {}
+        self.updateGeometry()
+        self.viewport().update()
+
+    def sizeHint(self):
+        base = super().sizeHint()
+        if not self._summary:
+            return base
+        return QSize(base.width(), base.height() + self._summary_height)
+
+    def sectionSizeFromContents(self, logicalIndex: int):
+        base = super().sectionSizeFromContents(logicalIndex)
+        if not self._summary:
+            return base
+        return QSize(base.width(), base.height() + self._summary_height)
+
+    def paintSection(self, painter: QPainter, rect: QRect, logicalIndex: int):
+        option = QStyleOptionHeader()
+        self.initStyleOption(option)
+        option.rect = rect
+        option.section = logicalIndex
+        option.textAlignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        # Retrieve label text
+        try:
+            header_text = self.model().headerData(logicalIndex, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+        except Exception:
+            header_text = None
+        option.text = str(header_text) if header_text is not None else option.text
+        # Draw section background/borders
+        self.style().drawControl(QStyle.ControlElement.CE_HeaderSection, option, painter, self)
+        # Draw the month/label in the upper band
+        base_size = self.sectionSizeFromContents(logicalIndex)
+        label_h = max(14, min(base_size.height(), rect.height()))
+        label_rect = QRect(rect.left(), rect.top(), rect.width(), label_h)
+        label_opt = QStyleOptionHeader(option)
+        label_opt.rect = label_rect
+        self.style().drawControl(QStyle.ControlElement.CE_HeaderLabel, label_opt, painter, self)
+        # Summary band at the bottom
+        summary = self._summary.get(logicalIndex)
+        if not summary:
+            return
+        if len(summary) == 3:
+            text, brush, alignment = summary
+        else:
+            text, brush = summary
+            alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        summary_h = rect.height() - label_h
+        if summary_h <= 2:
+            return
+        summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
+        painter.save()
+        painter.fillRect(summary_rect, brush)
+        divider_pen = QPen(QColor('#9CA3AF'), 1)
+        painter.setPen(divider_pen)
+        painter.drawLine(summary_rect.topLeft(), summary_rect.topRight())
+        painter.setPen(QPen(QColor('#111')))
+        painter.setFont(self._summary_font)
+        painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
+        painter.restore()
+
+
 
 
 
