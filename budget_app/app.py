@@ -75,48 +75,41 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
             values[bid] = overrides.get(bid, 0.0)
         return values, sum_overrides, False, set(overrides.keys())
 
+    limited_view = bool(expected_count) and 0 < len(month_bids) < expected_count
     over_limit = False
-    if annual_total:
+    if annual_total is not None:
         over_limit = abs(sum_overrides) > abs(annual_total)
 
     values = {}
+    if limited_view:
+        for bid in month_bids:
+            values[bid] = overrides.get(bid, 0.0) or 0.0
+        return values, sum(values.values()), over_limit, set(overrides.keys())
+
     if over_limit:
         total_display = sum_overrides
         for bid in month_bids:
             values[bid] = overrides.get(bid, 0.0)
-    else:
-        total_display = annual_total
-        if not missing_bids:
-            for bid in month_bids:
-                values[bid] = overrides.get(bid, 0.0)
-            diff = annual_total - sum_overrides
-            should_distribute_across_present = expected_count and len(month_bids) < expected_count
-            if not should_distribute_across_present or not overrides or abs(diff) <= 1e-6:
-                if not should_distribute_across_present:
-                    total_display = sum_overrides
-                return values, total_display, over_limit, set(overrides.keys())
-            override_bids = [bid for bid in month_bids if bid in overrides]
-            if override_bids:
-                share = diff / len(override_bids)
-                accumulated = 0.0
-                for bid in override_bids[:-1]:
-                    values[bid] += share
-                    accumulated += share
-                values[override_bids[-1]] += diff - accumulated
-            return values, total_display, over_limit, set(overrides.keys())
+        return values, total_display, over_limit, set(overrides.keys())
 
-        remainder = annual_total - sum_overrides
-        share = remainder / len(missing_bids) if missing_bids else 0.0
+    total_display = annual_total
+    if not missing_bids:
         for bid in month_bids:
-            if bid in overrides:
-                values[bid] = overrides[bid]
-            else:
-                values[bid] = share
-        if missing_bids:
-            diff = total_display - sum(values.values())
-            if abs(diff) > 1e-6:
-                last = missing_bids[-1]
-                values[last] += diff
+            values[bid] = overrides.get(bid, 0.0)
+        return values, sum_overrides, over_limit, set(overrides.keys())
+
+    remainder = annual_total - sum_overrides
+    share = remainder / len(missing_bids) if missing_bids else 0.0
+    for bid in month_bids:
+        if bid in overrides:
+            values[bid] = overrides[bid]
+        else:
+            values[bid] = share
+    if missing_bids:
+        diff = total_display - sum(values.values())
+        if abs(diff) > 1e-6:
+            last = missing_bids[-1]
+            values[last] += diff
     return values, total_display, over_limit, set(overrides.keys())
 
 
