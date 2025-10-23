@@ -26,6 +26,16 @@ CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
 PERIOD_COLUMN_WIDTH = 60     # width for the period column
 NUMERIC_COLUMN_WIDTH = 80    # width for budget/actual numeric columns (adjust to taste)
 MIN_COLUMN_WIDTH = 10        # hard floor so small widths like 20 stay effective
+DIFF_POSITIVE_COLOR = QColor("#BDEDB8")
+DIFF_NEGATIVE_COLOR = QColor("#F8C8C8")
+
+
+def format_diff_value(value: float) -> str:
+    return "0" if abs(value) < 1e-6 else f"{value:,.2f}"
+
+
+def diff_background(value: float) -> QBrush:
+    return QBrush(DIFF_POSITIVE_COLOR if value >= 0 else DIFF_NEGATIVE_COLOR)
 
 
 def annual_total_from_period(amount, period, months_count):
@@ -229,7 +239,6 @@ class BudgetApp(QWidget):
             self.view.setItemDelegateForColumn(period_col, self.period_delegate)
         budget_columns = []
         if entries:
-            budget_columns.append(1)
             for idx in range(3, len(header_names) - 1):
                 budget_columns.append(idx)
         for col in budget_columns:
@@ -354,11 +363,9 @@ class BudgetApp(QWidget):
             year_diff = (
                 actual_map.get((cid, header_ids[0]), 0.0) - budget_map.get((cid, header_ids[0]), (0.0,))[0]
             )
-            year_cell = make_item(f"{year_diff:,.2f}" if year_diff else "", False)
+            year_cell = make_item(format_diff_value(year_diff), False)
             year_cell.setFont(diff_font)
-            year_cell.setBackground(
-                QBrush(QColor("#D1F0D1") if year_diff > 0 else QColor("#F8D6D6") if year_diff < 0 else QColor("#EEE"))
-            )
+            year_cell.setBackground(diff_background(year_diff))
             diff_row.append(year_cell)
             diff_row.append(make_item("", False))
             for bid in header_ids[1:]:
@@ -368,24 +375,14 @@ class BudgetApp(QWidget):
                     b = budget_map.get((cid, bid), (0.0,))[0] or 0.0
                 d = a - b
                 total_diff += d
-                cell = make_item(f"{d:,.2f}" if d else "", False)
+                cell = make_item(format_diff_value(d), False)
                 cell.setFont(diff_font)
-                cell.setBackground(
-                    QBrush(QColor("#D1F0D1") if d > 0 else QColor("#F8D6D6") if d < 0 else QColor("#EEE"))
-                )
+                cell.setBackground(diff_background(d))
                 diff_row.append(cell)
             total_diff_adjusted = total_act - display_total
-            tot_cell = make_item(f"{total_diff_adjusted:,.2f}", False)
+            tot_cell = make_item(format_diff_value(total_diff_adjusted), False)
             tot_cell.setFont(diff_font)
-            tot_cell.setBackground(
-                QBrush(
-                    QColor("#D1F0D1")
-                    if total_diff_adjusted > 0
-                    else QColor("#F8D6D6")
-                    if total_diff_adjusted < 0
-                    else QColor("#EEE")
-                )
-            )
+            tot_cell.setBackground(diff_background(total_diff_adjusted))
             diff_row.append(tot_cell)
             if depth == 0:
                 # keep per-cell diff coloring; only shade the label cell
@@ -592,13 +589,11 @@ class BudgetApp(QWidget):
             year_diff = year_act - year_bud
             year_cell = target.child(diff_row_idx, 1)
             if year_cell:
-                year_cell.setText(f"{year_diff:,.2f}" if year_diff else "")
+                year_cell.setText(format_diff_value(year_diff))
                 f = QFont("Segoe UI", 9)
                 f.setItalic(True)
                 year_cell.setFont(f)
-                year_cell.setBackground(
-                    QBrush(QColor("#D1F0D1") if year_diff > 0 else QColor("#F8D6D6") if year_diff < 0 else QColor("#EEE"))
-                )
+                year_cell.setBackground(diff_background(year_diff))
             # monthly diffs
             total_diff = 0.0
             for idx, bid in enumerate(month_bids, start=3):
@@ -610,32 +605,22 @@ class BudgetApp(QWidget):
                 total_diff += d
                 cell = target.child(diff_row_idx, idx)
                 if cell:
-                    cell.setText(f"{d:,.2f}" if d else "")
+                    cell.setText(format_diff_value(d))
                     f = QFont("Segoe UI", 9)
                     f.setItalic(True)
                     cell.setFont(f)
-                    cell.setBackground(
-                        QBrush(QColor("#D1F0D1") if d > 0 else QColor("#F8D6D6") if d < 0 else QColor("#EEE"))
-                    )
+                    cell.setBackground(diff_background(d))
             tot_diff_cell = target.child(diff_row_idx, tot_col)
             if tot_diff_cell:
                 total_act = actual_map.get((cid, year_bid), 0.0)
                 for bid in month_bids:
                     total_act += actual_map.get((cid, bid), 0.0)
                 total_diff_adjusted = total_act - display_total
-                tot_diff_cell.setText(f"{total_diff_adjusted:,.2f}")
+                tot_diff_cell.setText(format_diff_value(total_diff_adjusted))
                 f = QFont("Segoe UI", 9)
                 f.setItalic(True)
                 tot_diff_cell.setFont(f)
-                tot_diff_cell.setBackground(
-                    QBrush(
-                        QColor("#D1F0D1")
-                        if total_diff_adjusted > 0
-                        else QColor("#F8D6D6")
-                        if total_diff_adjusted < 0
-                        else QColor("#EEE")
-                    )
-                )
+                tot_diff_cell.setBackground(diff_background(total_diff_adjusted))
             if not self.children_map.get(cid):
                 total_act = actual_map.get((cid, year_bid), 0.0)
                 for bid in month_bids:
