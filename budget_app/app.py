@@ -4,10 +4,10 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QTreeView, QHeaderView, QMessageBox, QFileDialog,
-    QSizePolicy,
+    QSizePolicy, QAbstractItemView,
 )
 from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -20,7 +20,12 @@ from .repository import (
     load_budgets_for_year,
     upsert_budget_entry,
 )
-from .ui import make_item, PeriodDelegate
+from .ui import make_item, PeriodDelegate, ButtonDelegate
+
+CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
+PERIOD_COLUMN_WIDTH = 60     # width for the period column
+NUMERIC_COLUMN_WIDTH = 80    # width for budget/actual numeric columns (adjust to taste)
+MIN_COLUMN_WIDTH = 10        # hard floor so small widths like 20 stay effective
 
 
 def annual_total_from_period(amount, period, months_count):
@@ -145,15 +150,35 @@ class BudgetApp(QWidget):
         self.view = QTreeView()
         self.model = QStandardItemModel()
         self.view.setModel(self.model)
+        self.view.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
         header = self.view.header()
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         header.setStretchLastSection(False)
+        header.setMinimumSectionSize(MIN_COLUMN_WIDTH)
+        header.setDefaultSectionSize(NUMERIC_COLUMN_WIDTH)
         layout.addWidget(self.view)
 
+        self.default_delegate = self.view.itemDelegate()
         self.period_delegate = PeriodDelegate()
+        self.budget_button_delegate = ButtonDelegate(self.view, self.apply_actual_to_budget)
         self.apply_light_theme()
         self.refresh()
+
+    def _apply_column_widths(self, header_names):
+        header = self.view.header()
+        for col, name in enumerate(header_names):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            if col == 0:
+                width = CATEGORY_COLUMN_WIDTH
+            elif name == "Period":
+                width = PERIOD_COLUMN_WIDTH
+            else:
+                width = NUMERIC_COLUMN_WIDTH
+            header.resizeSection(col, width)
+            self.view.setColumnWidth(col, width)
 
     def apply_light_theme(self):
         self.setStyleSheet(
@@ -187,7 +212,32 @@ class BudgetApp(QWidget):
 
         self.model.clear()
         self.model.setHorizontalHeaderLabels(header_names)
-        self.view.setItemDelegateForColumn(2, self.period_delegate)
+        for col in range(self.model.columnCount()):
+            self.view.setItemDelegateForColumn(col, self.default_delegate)
+        self._apply_column_widths(header_names)
+        for col in range(1, len(header_names)):
+            if header_names[col] == "Period":
+                continue
+            self.model.setHeaderData(
+                col,
+                Qt.Orientation.Horizontal,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                Qt.ItemDataRole.TextAlignmentRole,
+            )
+        period_col = header_names.index("Period") if "Period" in header_names else None
+        if period_col is not None and period_col < self.model.columnCount():
+            self.view.setItemDelegateForColumn(period_col, self.period_delegate)
+        budget_columns = []
+        if entries:
+            budget_columns.append(1)
+            for idx in range(3, len(header_names) - 1):
+                budget_columns.append(idx)
+        for col in budget_columns:
+            if 0 <= col < self.model.columnCount():
+                self.view.setItemDelegateForColumn(col, self.budget_button_delegate)
+        total_col = len(header_names) - 1
+        if 0 <= total_col < self.model.columnCount():
+            self.view.setItemDelegateForColumn(total_col, self.default_delegate)
 
         df_actual = fetch_actuals_for_year(year)
         df_bud = load_budgets_for_year(year, self.name_to_id, self.per_year_entries)
@@ -207,6 +257,8 @@ class BudgetApp(QWidget):
         self.actual_map = actual_map
         self.base_budget_map = budget_map
         self.category_totals = {}
+
+        QTimer.singleShot(0, lambda hn=list(header_names): self._apply_column_widths(hn))
 
         def add_category(cid, depth=0):
             cname = ("    " * depth) + self.id2name.get(cid, f"(id:{cid})")
@@ -592,6 +644,48 @@ class BudgetApp(QWidget):
                 self.update_summary_chart()
         finally:
             self._recalc_guard = False
+
+    def apply_actual_to_budget(self, index):
+        meta = index.data(Qt.ItemDataRole.UserRole)
+        if not meta or not isinstance(meta, tuple) or meta[0] != "budget":
+            return
+        _, cid, bid = meta
+        cid = int(cid)
+        bid = int(bid)
+
+        actual_value = None
+        parent_index = index.parent()
+        category_item = self.model.itemFromIndex(parent_index)
+        if category_item:
+            for row in range(category_item.rowCount()):
+                label_item = category_item.child(row, 0)
+                if label_item and label_item.text() == "Actual":
+                    actual_cell = category_item.child(row, index.column())
+                    if actual_cell:
+                        text_val = (actual_cell.text() or "").replace(" ", "").replace(",", "")
+                        try:
+                            actual_value = float(text_val)
+                        except ValueError:
+                            actual_value = 0.0
+                    break
+        if actual_value is None:
+            actual_value = self.actual_map.get((cid, bid))
+        if actual_value is None:
+            if bid in self.header_ids[1:]:
+                actual_value = 0.0
+            else:
+                actual_value = 0.0
+                for month_bid in self.header_ids[1:]:
+                    actual_value += self.actual_map.get((cid, month_bid), 0.0)
+
+        try:
+            self._recalc_guard = True
+            self.model.setData(index, f"{actual_value:,.2f}", Qt.ItemDataRole.EditRole)
+        finally:
+            self._recalc_guard = False
+        item = self.model.itemFromIndex(index)
+        if item:
+            self.on_item_changed(item)
 
     def on_item_changed(self, item):
         # ignore changes that come from programmatic recalculation

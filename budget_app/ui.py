@@ -1,5 +1,7 @@
 ﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication
-from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor
+from pathlib import Path
+
+from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap
 from PyQt6.QtCore import Qt, QRect, QSize, QEvent
 
 from .config import PERIOD_CHOICES
@@ -44,9 +46,11 @@ class ButtonDelegate(QStyledItemDelegate):
         self.view.setMouseTracking(True)
         self.view.viewport().setMouseTracking(True)
         self.callback = callback
-        self.button_size = QSize(12, 12)
-        self.margin = 3
+        self.button_size = QSize(16, 16)
+        self.margin = 4
         self._pressed = None
+        icon_path = Path(__file__).resolve().parent.parent / "pari.png"
+        self.icon_pixmap = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
 
     def paint(self, painter, option, index):
         meta = index.data(Qt.ItemDataRole.UserRole)
@@ -54,17 +58,41 @@ class ButtonDelegate(QStyledItemDelegate):
             super().paint(painter, option, index)
             return
 
-        item_option = QStyleOptionViewItem(option)
-        self.initStyleOption(item_option, index)
+        text_option = QStyleOptionViewItem(option)
+        self.initStyleOption(text_option, index)
+        reserve = self.button_size.width() + self.margin * 2
+        if text_option.rect.width() > reserve:
+            text_option.rect = text_option.rect.adjusted(0, 0, -reserve, 0)
+        else:
+            text_option.rect = text_option.rect.adjusted(0, 0, -self.margin, 0)
         style = self.view.style() if self.view else QApplication.style()
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, item_option, painter, self.view)
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, text_option, painter, self.view)
 
-        button_rect = self._button_rect(option, index, item_option)
+        button_rect = self._button_rect(option, index)
         painter.save()
-        painter.setPen(QColor(Qt.GlobalColor.black))
-        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
-        painter.drawRect(button_rect)
-        painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, "=")
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if self._pressed == (index.row(), index.column()):
+            fill_color = QColor("#cbd5f5")
+        elif option.state & QStyle.StateFlag.State_MouseOver:
+            fill_color = QColor("#e0f2fe")
+        else:
+            fill_color = QColor("#f3f4f6")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(fill_color))
+        painter.drawRoundedRect(button_rect, 3, 3)
+        if not self.icon_pixmap.isNull():
+            pixmap = self.icon_pixmap
+            target_size = button_rect.size()
+            if pixmap.size() != target_size:
+                pixmap = pixmap.scaled(
+                    target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                )
+            icon_x = button_rect.x() + max((button_rect.width() - pixmap.width()) // 2, 0)
+            icon_y = button_rect.y() + max((button_rect.height() - pixmap.height()) // 2, 0)
+            painter.drawPixmap(icon_x, icon_y, pixmap)
+        else:
+            painter.setPen(QColor(Qt.GlobalColor.black))
+            painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, "=")
         painter.restore()
 
     def editorEvent(self, event, model, option, index):
@@ -118,17 +146,13 @@ class ButtonDelegate(QStyledItemDelegate):
             item_option = QStyleOptionViewItem(option)
             self.initStyleOption(item_option, index)
 
-        style = self.view.style() if self.view else QApplication.style()
-        text_rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, item_option, self.view)
-        fm = item_option.fontMetrics
-        flags = int(item_option.displayAlignment)
-        aligned_rect = fm.boundingRect(text_rect, flags, item_option.text)
-        text_end = aligned_rect.left() + aligned_rect.width()
-        if text_end < text_rect.left():
-            text_end = text_rect.left()
-
         rect = option.rect
         width = self.button_size.width()
+        max_width = rect.width() - self.margin * 2
+        if max_width <= 0:
+            width = max(self.button_size.width(), rect.width())
+        else:
+            width = min(self.button_size.width(), max_width)
         available_height = rect.height() - self.margin * 2
         if available_height > 0:
             height = min(self.button_size.height(), available_height)
@@ -137,13 +161,10 @@ class ButtonDelegate(QStyledItemDelegate):
         height = max(height, 6)
         y = rect.y() + max((rect.height() - height) // 2, 0)
 
+        x = rect.right() - width - self.margin
         min_x = rect.left() + self.margin
-        max_x = rect.right() - width - self.margin
-        x = text_end + self.margin
         if x < min_x:
             x = min_x
-        if x > max_x:
-            x = max_x
 
         return QRect(int(x), int(y), width, height)
 
