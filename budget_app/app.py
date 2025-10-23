@@ -85,7 +85,12 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
     if limited_view:
         for bid in month_bids:
             values[bid] = overrides.get(bid, 0.0) or 0.0
-        return values, sum(values.values()), over_limit, set(overrides.keys())
+        if year_amount is not None:
+            total_display = annual_total
+        else:
+            total_display = sum(values.values())
+            over_limit = False
+        return values, total_display, over_limit, set(overrides.keys())
 
     if over_limit:
         total_display = sum_overrides
