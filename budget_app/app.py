@@ -20,12 +20,13 @@ from .repository import (
     load_budgets_for_year,
     upsert_budget_entry,
 )
-from .ui import make_item, PeriodDelegate, ButtonDelegate
+from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate
 
 CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
 PERIOD_COLUMN_WIDTH = 60     # width for the period column
 NUMERIC_COLUMN_WIDTH = 80    # width for budget/actual numeric columns (adjust to taste)
 MIN_COLUMN_WIDTH = 10        # hard floor so small widths like 20 stay effective
+MAIN_CATEGORY_BG = QColor("#D6E8FF")  # light blue background for main categories
 DIFF_POSITIVE_COLOR = QColor("#BDEDB8")
 DIFF_NEGATIVE_COLOR = QColor("#F8C8C8")
 
@@ -170,6 +171,7 @@ class BudgetApp(QWidget):
         self.default_delegate = self.view.itemDelegate()
         self.period_delegate = PeriodDelegate()
         self.budget_button_delegate = ButtonDelegate(self.view, self.apply_actual_to_budget)
+        self.total_divider_delegate = DividerDelegate(self.view)
         self.apply_light_theme()
         self.refresh()
 
@@ -193,6 +195,7 @@ class BudgetApp(QWidget):
             QPushButton { background-color: #f3f4f6; border: 1px solid #ccc; border-radius: 5px; padding: 4px 10px; font-size: 11px; }
             QPushButton:hover { background-color: #e2e6ea; }
             QHeaderView::section { background-color: #f2f2f2; color: #111; font-weight: bold; font-size: 11px; }
+            QHeaderView::section:last { border-left: 1px solid #000; }
             QTreeView { alternate-background-color: #fafafa; gridline-color: #eee; font-size: 11px; }
             """
         )
@@ -242,7 +245,7 @@ class BudgetApp(QWidget):
                 self.view.setItemDelegateForColumn(col, self.budget_button_delegate)
         total_col = len(header_names) - 1
         if 0 <= total_col < self.model.columnCount():
-            self.view.setItemDelegateForColumn(total_col, self.default_delegate)
+            self.view.setItemDelegateForColumn(total_col, self.total_divider_delegate)
 
         df_actual = fetch_actuals_for_year(year)
         df_bud = load_budgets_for_year(year, self.name_to_id, self.per_year_entries)
@@ -293,7 +296,7 @@ class BudgetApp(QWidget):
             if depth == 0:
                 # shade entire row for main categories
                 for it in act_row:
-                    it.setBackground(QBrush(QColor("#f0f0f0")))
+                    it.setBackground(QBrush(MAIN_CATEGORY_BG))
             cat_item.appendRow(act_row)
 
             # Budget row
@@ -345,7 +348,7 @@ class BudgetApp(QWidget):
             bud_row.append(tot_item)
             if depth == 0:
                 for it in bud_row:
-                    it.setBackground(QBrush(QColor("#f0f0f0")))
+                    it.setBackground(QBrush(MAIN_CATEGORY_BG))
             # Highlight in red if explicit monthly budgets exceed annual budget in absolute value
             if over_limit:
                 tot_item.setBackground(QBrush(QColor("#F8D6D6")))
@@ -381,8 +384,9 @@ class BudgetApp(QWidget):
             tot_cell.setBackground(diff_background(total_diff_adjusted))
             diff_row.append(tot_cell)
             if depth == 0:
-                # keep per-cell diff coloring; only shade the label cell
-                diff_row[0].setBackground(QBrush(QColor("#f0f0f0")))
+                for cell in diff_row:
+                    if cell:
+                        cell.setBackground(QBrush(MAIN_CATEGORY_BG))
             cat_item.appendRow(diff_row)
 
             for ch in sorted(self.children_map.get(cid, []), key=lambda x: self.id2name.get(x, "")):
@@ -574,7 +578,7 @@ class BudgetApp(QWidget):
                 else:
                     # reset to default based on depth shading
                     if depth == 0:
-                        tot_item.setBackground(QBrush(QColor("#f0f0f0")))
+                        tot_item.setBackground(QBrush(MAIN_CATEGORY_BG))
                     else:
                         tot_item.setBackground(QBrush())
 
@@ -617,6 +621,11 @@ class BudgetApp(QWidget):
                 f.setItalic(True)
                 tot_diff_cell.setFont(f)
                 tot_diff_cell.setBackground(diff_background(total_diff_adjusted))
+            if depth == 0 and diff_row_idx is not None:
+                for idx in range(target.columnCount()):
+                    cell = target.child(diff_row_idx, idx)
+                    if cell:
+                        cell.setBackground(QBrush(MAIN_CATEGORY_BG))
             if not self.children_map.get(cid):
                 total_act = actual_map.get((cid, year_bid), 0.0)
                 for bid in month_bids:

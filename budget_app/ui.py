@@ -1,7 +1,7 @@
 ﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication
 from pathlib import Path
 
-from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap
+from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen
 from PyQt6.QtCore import Qt, QRect, QSize, QEvent
 
 from .config import PERIOD_CHOICES
@@ -168,6 +168,24 @@ class ButtonDelegate(QStyledItemDelegate):
 
         return QRect(int(x), int(y), width, height)
 
+
+class DividerDelegate(QStyledItemDelegate):
+    def __init__(self, parent, *, line_color: QColor | Qt.GlobalColor = Qt.GlobalColor.black, line_width: int = 1):
+        super().__init__(parent)
+        self.line_color = QColor(line_color)
+        self.line_width = line_width
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        painter.save()
+        pen = QPen(self.line_color)
+        pen.setWidth(self.line_width)
+        painter.setPen(pen)
+        top = option.rect.top()
+        bottom = option.rect.bottom()
+        x = option.rect.left()
+        painter.drawLine(x, top, x, bottom)
+        painter.restore()
 
 
 
