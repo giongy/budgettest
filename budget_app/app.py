@@ -124,7 +124,10 @@ class BudgetApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Budget Manager - Tema Chiaro")
-        self.resize(1300, 800)
+        screen = QApplication.primaryScreen().availableGeometry()
+        width = int(screen.width() * 0.8)
+        height = int(screen.height() * 0.8)
+        self.resize(width, height)
         self.years, self.per_year_entries, self.name_to_id = load_budgetyear_map()
         self.id2name, self.children_map, self.root_ids = load_categories()
         self.edits = {}
@@ -687,7 +690,7 @@ class BudgetApp(QWidget):
                 val = float(str(item.text()).replace(",", "").strip() or 0.0)
             except Exception:
                 return
-            item.setBackground(QColor("#E3F2FD"))
+            item.setBackground(QColor("#FFF3B0"))
             year = self.year_cb.currentText()
             annual_bid = None
             entries = self.per_year_entries.get(year, [])
@@ -744,7 +747,7 @@ class BudgetApp(QWidget):
                         break
                 break
 
-            item.setBackground(QColor("#E3F2FD"))
+            item.setBackground(QColor("#FFF3B0"))
             self.edits[(int(bid), int(cid))] = {"period": val, "amount": amount_val}
             self.recalc_category(int(cid))
 
