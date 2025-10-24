@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -691,35 +691,56 @@ class BudgetApp(QWidget):
                 width = bar.get_width()
                 if abs(width) < 1e-8:
                     continue
-                magnitude = abs(value)
                 text = f"{value:,.2f}"
-                digits = len(f"{int(magnitude)}")
-                estimated_text_w = max(len(text) * 0.014, 0.08)
-                inner_threshold = limit * 0.12
-                min_inside = max(inner_threshold, estimated_text_w)
-                show_inside = abs(width) > min_inside
 
-                # Adjust offset if the space outside is limited
-                outside_pad = max(offset, estimated_text_w * 0.4)
+                # Estimate text width in pixels for 9pt font
+                fontsize_pt = 9.0
+                dpi = ax.figure.dpi
+                px_per_pt = dpi / 72.0
+                avg_char_px = 0.6 * fontsize_pt * px_per_pt
+                text_px = max(len(text) * avg_char_px, 10)
+
+                # Compute bar width in pixels
+                x0_px = ax.transData.transform((0, 0))[0]
+                xw_px = ax.transData.transform((width, 0))[0]
+                bar_px = abs(xw_px - x0_px)
+
+                # Decide inside/outside based on pixel widths
+                inside_pad_px = 6
+                outside_pad_px = max(8, text_px * 0.25)
+                show_inside = bar_px > (text_px + inside_pad_px + 2)
+
+                # Helper to convert px to data units using local scale
+                inv = ax.transData.inverted()
+                def px_to_data(px):
+                    return inv.transform((x0_px + px, 0))[0] - inv.transform((x0_px, 0))[0]
+
+                left_lim, right_lim = ax.get_xlim()
+                text_data_w = px_to_data(text_px)
+                pad_in_data = px_to_data(inside_pad_px)
+                pad_out_data = px_to_data(outside_pad_px)
 
                 if width >= 0:
                     if show_inside:
-                        x_pos = width - offset
+                        x_pos = width - pad_in_data
                         ha = "right"
-                        text_color = "#f8fafc"
+                        color = "#f8fafc"
                     else:
-                        x_pos = width + outside_pad
+                        x_pos = width + pad_out_data
+                        x_pos = min(x_pos, right_lim - text_data_w - px_to_data(2))
                         ha = "left"
-                        text_color = "#1f2937"
+                        color = "#1f2937"
                 else:
                     if show_inside:
-                        x_pos = width + offset
+                        x_pos = width + pad_in_data
                         ha = "left"
-                        text_color = "#f8fafc"
+                        color = "#f8fafc"
                     else:
-                        x_pos = width - outside_pad
+                        x_pos = width - pad_out_data
+                        x_pos = max(x_pos, left_lim + text_data_w + px_to_data(2))
                         ha = "right"
-                        text_color = "#991b1b"
+                        color = "#991b1b"
+
                 ax.text(
                     x_pos,
                     bar.get_y() + bar.get_height() / 2,
@@ -728,7 +749,7 @@ class BudgetApp(QWidget):
                     ha=ha,
                     fontsize=9,
                     fontweight="bold",
-                    color=text_color,
+                    color=color,
                 )
             ax.margins(y=0.28)
             ax.text(
@@ -1142,3 +1163,4 @@ def main():
     w = BudgetApp()
     w.show()
     sys.exit(app.exec())
+
