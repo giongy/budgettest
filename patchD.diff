@@ -1,0 +1,52 @@
+*** Begin Patch
+*** Update File: budget_app/app.py
+@@
+-from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize, QEvent
++from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize, QEvent
+@@
+-from .style import (
+-    CATEGORY_COLUMN_WIDTH,
+-    PERIOD_COLUMN_WIDTH,
+-    NUMERIC_COLUMN_WIDTH,
+-    MIN_COLUMN_WIDTH,
+-    MAIN_CATEGORY_BG,
+-    DIFF_POSITIVE_COLOR,
+-    DIFF_NEGATIVE_COLOR,
+-    UI_FONT_FAMILY,
+-    DIFF_FONT_SIZE,
+-    WINDOW_SCALE_RATIO,
+-    CHART_HEIGHT,
+-)
++from .style import (
++    CATEGORY_COLUMN_WIDTH,
++    PERIOD_COLUMN_WIDTH,
++    NUMERIC_COLUMN_WIDTH,
++    MIN_COLUMN_WIDTH,
++    MAIN_CATEGORY_BG,
++    DIFF_POSITIVE_COLOR,
++    DIFF_NEGATIVE_COLOR,
++    UI_FONT_FAMILY,
++    DIFF_FONT_SIZE,
++    WINDOW_SCALE_RATIO,
++    CHART_HEIGHT,
++)
+@@
+-        layout = QVBoxLayout(self)
+-        self.db_label = QLabel(f"Database: {config.DB_PATH}")
+-        layout.addWidget(self.db_label)
++        layout = QVBoxLayout(self)
++        path_text = str(config.DB_PATH)
++        self.db_label = QLabel(f"Database: {Path(path_text).name}")
++        self.db_label.setToolTip(path_text)
++        self.db_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
++        layout.addWidget(self.db_label)
+@@
+-        self.canvas = FigureCanvasQTAgg(self.figure)
+-        self.canvas.setMinimumHeight(220)
++        self.canvas = FigureCanvasQTAgg(self.figure)
++        self.canvas.setFixedHeight(CHART_HEIGHT)
+@@
+-            self.db_label.setText(f"Database: {config.DB_PATH}")
++            self.db_label.setText(f"Database: {Path(str(config.DB_PATH)).name}")
++            self.db_label.setToolTip(str(config.DB_PATH))
+*** End Patch

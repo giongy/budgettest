@@ -20,3 +20,7 @@ SUMMARY_FONT_SIZE = 10
 
 # Window geometry
 WINDOW_SCALE_RATIO = 0.9
+
+# Chart settings
+CHART_HEIGHT = 110
+

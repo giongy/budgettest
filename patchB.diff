@@ -1,0 +1,29 @@
+*** Begin Patch
+*** Update File: budget_app/app.py
+@@
+-from .style import (
+-    CATEGORY_COLUMN_WIDTH,
+-    PERIOD_COLUMN_WIDTH,
+-    NUMERIC_COLUMN_WIDTH,
+-    MIN_COLUMN_WIDTH,
+-    MAIN_CATEGORY_BG,
+-    DIFF_POSITIVE_COLOR,
+-    DIFF_NEGATIVE_COLOR,
+-    UI_FONT_FAMILY,
+-    DIFF_FONT_SIZE,
+-    WINDOW_SCALE_RATIO,
+-)    CHART_HEIGHT,`r`n)
++from .style import (
++    CATEGORY_COLUMN_WIDTH,
++    PERIOD_COLUMN_WIDTH,
++    NUMERIC_COLUMN_WIDTH,
++    MIN_COLUMN_WIDTH,
++    MAIN_CATEGORY_BG,
++    DIFF_POSITIVE_COLOR,
++    DIFF_NEGATIVE_COLOR,
++    UI_FONT_FAMILY,
++    DIFF_FONT_SIZE,
++    WINDOW_SCALE_RATIO,
++    CHART_HEIGHT,
++)
+*** End Patch

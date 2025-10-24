@@ -1,0 +1,8 @@
+*** Begin Patch
+*** Update File: budget_app/style.py
+@@
+ WINDOW_SCALE_RATIO = 0.9
++
++# Chart settings
++CHART_HEIGHT = 220
+*** End Patch

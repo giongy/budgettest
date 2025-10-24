@@ -1,0 +1,14 @@
+*** Begin Patch
+*** Update File: budget_app/app.py
+@@
+-from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
++from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize, QEvent
+@@
+-from .style import (
++from .style import (
+@@
+-    WINDOW_SCALE_RATIO,
++    WINDOW_SCALE_RATIO,
++    CHART_HEIGHT,
+ )
+*** End Patch

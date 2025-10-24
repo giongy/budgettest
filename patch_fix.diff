@@ -1,0 +1,12 @@
+*** Begin Patch
+*** Update File: budget_app/app.py
+@@
+-        layout = QVBoxLayout(self)
+-        layout.addWidget(self.db_label)
++        layout = QVBoxLayout(self)
++        path_text = str(config.DB_PATH)
++        self.db_label = QLabel(f"Database: {Path(path_text).name}")
++        self.db_label.setToolTip(path_text)
++        self.db_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
++        layout.addWidget(self.db_label)
+*** End Patch
