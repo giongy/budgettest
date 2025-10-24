@@ -105,3 +105,13 @@ def upsert_budget_entry(budgetyearid, categid, period, amount):
                 (budgetyearid, categid, str(period), float(amount)),
             )
         conn.commit()
+
+
+def delete_budget_entry(budgetyearid, categid):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM budgettable_v1 WHERE BUDGETYEARID=? AND CATEGID=?",
+            (budgetyearid, categid),
+        )
+        conn.commit()

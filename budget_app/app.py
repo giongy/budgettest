@@ -17,6 +17,7 @@ from .repository import (
     fetch_actuals_for_year,
     load_budgets_for_year,
     upsert_budget_entry,
+    delete_budget_entry,
 )
 from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView
 from .style import (
@@ -546,7 +547,7 @@ class BudgetApp(QWidget):
                 val = monthly_value_for_diff.get(bid, 0.0)
                 is_explicit = bid in explicit_bids
                 color = QColor("#01579b") if is_explicit else QColor("#6b7280") if val else QColor("#4b5563")
-                text = f"{val:,.2f}" if val else ""
+                text = format_diff_value(val) if (val or is_explicit) else ""
                 bud_row.append(
                     make_item(
                         text,
@@ -815,10 +816,22 @@ class BudgetApp(QWidget):
             period_cell = target.child(budget_row_idx, 2)
             year_per = (period_cell.text() or "").strip()
 
+            year_edit = self.edits.get((year_bid, cid)) or {}
+            base_year_entry = base_budget_map.get((cid, year_bid), (None, None))
+            if not year_per:
+                edit_period = year_edit.get("period")
+                if edit_period:
+                    year_per = edit_period
+                else:
+                    base_period = base_year_entry[1]
+                    if base_period:
+                        year_per = base_period
+
             # Effective annual amount (edits override base)
-            year_amt = self.edits.get((year_bid, cid), {}).get("amount")
-            if year_amt is None:
-                year_amt = base_budget_map.get((cid, year_bid), (0.0,))[0]
+            if "amount" in year_edit:
+                year_amt = year_edit.get("amount")
+            else:
+                year_amt = base_year_entry[0]
 
             # Explicit months map (edits override base)
             month_bids = list(header_ids[1:])
@@ -826,11 +839,13 @@ class BudgetApp(QWidget):
             for bid in month_bids:
                 edit_entry = self.edits.get((bid, cid))
                 if edit_entry and "amount" in edit_entry:
+                    if edit_entry["amount"] is None:
+                        continue
                     overrides[bid] = float(edit_entry["amount"])
-                else:
-                    base_amt, base_period = base_budget_map.get((cid, bid), (None, None))
-                    if base_amt is not None:
-                        overrides[bid] = float(base_amt)
+                    continue
+                base_amt, base_period = base_budget_map.get((cid, bid), (None, None))
+                if base_amt is not None:
+                    overrides[bid] = float(base_amt)
 
             # Re-render Budget row cells
             monthly_value_for_diff, display_total, over_limit, explicit_bids = compute_budget_distribution(
@@ -843,7 +858,7 @@ class BudgetApp(QWidget):
                 color = QColor("#01579b") if is_explicit else QColor("#6b7280") if val else QColor("#4b5563")
                 item = target.child(budget_row_idx, idx)
                 if item:
-                    item.setText(f"{val:,.2f}" if val else "")
+                    item.setText(format_diff_value(val) if (val or is_explicit) else "")
                     item.setForeground(QBrush(color))
 
             # Update total cell and color
@@ -962,10 +977,15 @@ class BudgetApp(QWidget):
 
         if kind == "budget":
             _, cid, bid = meta
-            try:
-                val = float(str(item.text()).replace(",", "").strip() or 0.0)
-            except Exception:
-                return
+            text_value = str(item.text() or "")
+            cleaned = text_value.replace(",", "").strip()
+            if cleaned in ("", "-"):
+                val = None
+            else:
+                try:
+                    val = float(cleaned)
+                except Exception:
+                    return
             item.setBackground(QColor("#FFF3B0"))
             year = self.year_cb.currentText()
             annual_bid = None
@@ -1043,9 +1063,12 @@ class BudgetApp(QWidget):
             return
         try:
             for (bid, cid), data in self.edits.items():
-                upsert_budget_entry(
-                    bid, cid, data.get("period", "Monthly"), data.get("amount", 0.0)
-                )
+                amount = data.get("amount")
+                period = data.get("period", "Monthly")
+                if amount is None:
+                    delete_budget_entry(bid, cid)
+                else:
+                    upsert_budget_entry(bid, cid, period, amount)
             QMessageBox.information(self, "Saved", "Budgets saved successfully.")
             self.refresh()
         except Exception as e:
