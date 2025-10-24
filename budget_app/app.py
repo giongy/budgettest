@@ -30,6 +30,7 @@ from .style import (
     UI_FONT_FAMILY,
     DIFF_FONT_SIZE,
     WINDOW_SCALE_RATIO,
+    CHART_HEIGHT,
 )
 
 
@@ -178,9 +179,9 @@ class BudgetApp(QWidget):
         top.addWidget(self.collapse_all_btn)
         layout.addLayout(top)
 
-        self.figure = Figure(figsize=(6, 2.2))
+        self.figure = Figure(figsize=(6, CHART_HEIGHT / 100), dpi=100)
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.canvas.setMinimumHeight(220)
+        self.canvas.setFixedHeight(CHART_HEIGHT)
         self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.canvas)
 
@@ -209,6 +210,11 @@ class BudgetApp(QWidget):
         self.current_headers: list[str] = []
         self.apply_light_theme()
         self.refresh()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Redraw charts once the widget has a real size; avoids narrow plots on first load
+        QTimer.singleShot(0, self.update_summary_chart)
 
     def _apply_column_widths(self, header_names):
         header = self.view.header()
