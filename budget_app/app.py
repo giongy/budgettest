@@ -29,6 +29,7 @@ from .style import (
     DIFF_NEGATIVE_COLOR,
     UI_FONT_FAMILY,
     DIFF_FONT_SIZE,
+    WINDOW_SCALE_RATIO,
 )
 
 
@@ -125,9 +126,10 @@ class BudgetApp(QWidget):
         super().__init__()
         self.setWindowTitle("Budget Manager - Tema Chiaro")
         screen = QApplication.primaryScreen().availableGeometry()
-        width = int(screen.width() * 0.8)
-        height = int(screen.height() * 0.8)
+        width = int(screen.width() * WINDOW_SCALE_RATIO)
+        height = int(screen.height() * WINDOW_SCALE_RATIO)
         self.resize(width, height)
+        self.move(screen.center() - self.rect().center())
         self.years, self.per_year_entries, self.name_to_id = load_budgetyear_map()
         self.id2name, self.children_map, self.root_ids = load_categories()
         self.edits = {}
@@ -144,7 +146,10 @@ class BudgetApp(QWidget):
         top.addWidget(QLabel("Year:"))
         self.year_cb = QComboBox()
         self.year_cb.addItems(self.years or [])
-        self.year_cb.currentTextChanged.connect(self.refresh)
+        last_year = config.load_last_budget_year()
+        if last_year and last_year in (self.years or []):
+            self.year_cb.setCurrentText(last_year)
+        self.year_cb.currentTextChanged.connect(self._on_year_changed)
         top.addWidget(self.year_cb)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)
@@ -217,6 +222,11 @@ class BudgetApp(QWidget):
                 width = NUMERIC_COLUMN_WIDTH
             header.resizeSection(col, width)
             self.view.setColumnWidth(col, width)
+
+    def _on_year_changed(self, year: str):
+        if year:
+            config.save_last_budget_year(year)
+        self.refresh()
 
     def _compute_summary_budget_totals(self, header_names: list[str]) -> dict[int, float]:
         totals: dict[int, float] = {}
@@ -370,10 +380,21 @@ class BudgetApp(QWidget):
             cat_item = make_item(
                 cname, False, bold=True, color=QColor("#000"), meta=("category_label", cid, depth)
             )
-            self.model.appendRow([cat_item])
-            # Light gray background for top-level categories (main categories)
+
             if depth == 0:
-                cat_item.setBackground(QBrush(QColor("#f0f0f0")))
+                row_items = [cat_item]
+                cat_item.setBackground(QBrush(MAIN_CATEGORY_BG))
+                for _ in range(1, len(header_names)):
+                    filler = make_item("", False)
+                    filler.setBackground(QBrush(MAIN_CATEGORY_BG))
+                    filler.setSelectable(False)
+                    row_items.append(filler)
+                self.model.appendRow(row_items)
+                for ch in sorted(self.children_map.get(cid, []), key=lambda x: self.id2name.get(x, "")):
+                    add_category(ch, depth + 1)
+                return
+
+            self.model.appendRow([cat_item])
 
             # Actual row
             act_row = [make_item("Actual", False)]
@@ -390,10 +411,6 @@ class BudgetApp(QWidget):
                 col = QColor("#1b5e20") if val > 0 else QColor("#b71c1c") if val < 0 else QColor("#000")
                 act_row.append(make_item(f"{val:,.2f}", False, ("actual", cid, bid), color=col))
             act_row.append(make_item(f"{total_act:,.2f}", False))
-            if depth == 0:
-                # shade entire row for main categories
-                for it in act_row:
-                    it.setBackground(QBrush(MAIN_CATEGORY_BG))
             cat_item.appendRow(act_row)
 
             # Budget row
@@ -443,9 +460,6 @@ class BudgetApp(QWidget):
 
             tot_item = make_item(f"{display_total:,.2f}", False)
             bud_row.append(tot_item)
-            if depth == 0:
-                for it in bud_row:
-                    it.setBackground(QBrush(MAIN_CATEGORY_BG))
             # Highlight in red if explicit monthly budgets exceed annual budget in absolute value
             if over_limit:
                 tot_item.setBackground(QBrush(QColor("#F8D6D6")))
@@ -480,10 +494,6 @@ class BudgetApp(QWidget):
             tot_cell.setFont(diff_font)
             tot_cell.setBackground(diff_background(total_diff_adjusted))
             diff_row.append(tot_cell)
-            if depth == 0:
-                for cell in diff_row:
-                    if cell:
-                        cell.setBackground(QBrush(MAIN_CATEGORY_BG))
             cat_item.appendRow(diff_row)
 
             for ch in sorted(self.children_map.get(cid, []), key=lambda x: self.id2name.get(x, "")):
@@ -961,9 +971,22 @@ class BudgetApp(QWidget):
             self.db_label.setText(f"Database: {config.DB_PATH}")
             self.years, self.per_year_entries, self.name_to_id = load_budgetyear_map()
             self.id2name, self.children_map, self.root_ids = load_categories()
+            saved_year = config.load_last_budget_year()
+            self.year_cb.blockSignals(True)
             self.year_cb.clear()
             self.year_cb.addItems(self.years or [])
-            self.refresh()
+            selected = ""
+            if saved_year and saved_year in (self.years or []):
+                self.year_cb.setCurrentText(saved_year)
+                selected = saved_year
+            elif self.years:
+                self.year_cb.setCurrentIndex(0)
+                selected = self.year_cb.currentText()
+            self.year_cb.blockSignals(False)
+            if selected:
+                self._on_year_changed(selected)
+            else:
+                self.refresh()
 
 
 def main():

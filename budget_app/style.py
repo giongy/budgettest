@@ -3,7 +3,7 @@ from PyQt6.QtGui import QColor
 # Column widths
 CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
 PERIOD_COLUMN_WIDTH = 60     # width for the period column
-NUMERIC_COLUMN_WIDTH = 80    # width for budget/actual numeric columns (adjust to taste)
+NUMERIC_COLUMN_WIDTH = 90    # width for budget/actual numeric columns (adjust to taste)
 MIN_COLUMN_WIDTH = 10        # hard floor so small widths like 20 stay effective
 
 # Row styling
@@ -13,8 +13,10 @@ DIFF_NEGATIVE_COLOR = QColor("#F18686")
 
 # Font settings
 UI_FONT_FAMILY = "Segoe UI"
-UI_BASE_FONT_SIZE = 10
-UI_BOLD_FONT_SIZE = 12
-DIFF_FONT_SIZE = 10
-SUMMARY_FONT_SIZE = 10
+UI_BASE_FONT_SIZE = 8
+UI_BOLD_FONT_SIZE = 9
+DIFF_FONT_SIZE = 9
+SUMMARY_FONT_SIZE = 8
 
+# Window geometry
+WINDOW_SCALE_RATIO = 0.9
