@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import configparser
+from typing import Any
 
 
 def _resolve_config_file() -> Path:
@@ -15,6 +16,36 @@ def _resolve_config_file() -> Path:
 
 CONFIG_FILE = _resolve_config_file()
 PERIOD_CHOICES = ["Monthly", "Quarterly", "Yearly", "Weekly"]
+
+STYLE_DEFAULTS: dict[str, Any] = {
+    "category_column_width": 250,
+    "period_column_width": 60,
+    "numeric_column_width": 90,
+    "min_column_width": 10,
+    "main_category_bg": "#7FB2F5",
+    "diff_positive_color": "#97F18D",
+    "diff_negative_color": "#F18686",
+    "ui_font_family": "Segoe UI",
+    "ui_base_font_size": 10,
+    "ui_bold_font_size": 10,
+    "diff_font_size": 10,
+    "summary_font_size": 10,
+    "window_scale_ratio": 0.9,
+    "chart_height": 150,
+}
+
+_STYLE_INT_KEYS = {
+    "category_column_width",
+    "period_column_width",
+    "numeric_column_width",
+    "min_column_width",
+    "ui_base_font_size",
+    "ui_bold_font_size",
+    "diff_font_size",
+    "summary_font_size",
+    "chart_height",
+}
+_STYLE_FLOAT_KEYS = {"window_scale_ratio"}
 
 
 def _load_cfg() -> configparser.ConfigParser:
@@ -59,6 +90,37 @@ def save_last_budget_year(year: str) -> None:
         cfg["app"] = {}
     cfg["app"]["budget_year"] = str(year)
     _save_cfg(cfg)
+
+
+def load_style_settings() -> dict[str, Any]:
+    cfg = _load_cfg()
+    updated = False
+    if "style" not in cfg:
+        cfg["style"] = {}
+        updated = True
+    section = cfg["style"]
+    settings: dict[str, Any] = {}
+    for key, default in STYLE_DEFAULTS.items():
+        raw_value = section.get(key)
+        if raw_value is None:
+            section[key] = str(default)
+            raw_value = str(default)
+            updated = True
+        try:
+            if key in _STYLE_INT_KEYS:
+                settings[key] = int(float(raw_value))
+            elif key in _STYLE_FLOAT_KEYS:
+                settings[key] = float(raw_value)
+            else:
+                settings[key] = raw_value
+        except (TypeError, ValueError):
+            # Fallback to default on invalid values
+            settings[key] = default
+            section[key] = str(default)
+            updated = True
+    if updated:
+        _save_cfg(cfg)
+    return settings
 
 
 # Mutable global used by db.get_conn; always reference via config.DB_PATH
