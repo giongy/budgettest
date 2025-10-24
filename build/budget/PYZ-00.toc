@@ -489,6 +489,7 @@
   ('budget_app.repository',
    'D:\\budgettest\\budget_app\\repository.py',
    'PYMODULE'),
+  ('budget_app.style', 'D:\\budgettest\\budget_app\\style.py', 'PYMODULE'),
   ('budget_app.ui', 'D:\\budgettest\\budget_app\\ui.py', 'PYMODULE'),
   ('bz2',
    'C:\\Users\\lucaa\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\bz2.py',
