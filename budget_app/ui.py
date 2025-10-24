@@ -53,9 +53,32 @@ class ButtonDelegate(QStyledItemDelegate):
         icon_path = Path(__file__).resolve().parent.parent / "pari.png"
         self.icon_pixmap = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
 
+    def _is_main_category_budget(self, index) -> bool:
+        if not index.isValid():
+            return False
+        meta = index.data(Qt.ItemDataRole.UserRole)
+        if not meta or not isinstance(meta, tuple) or meta[0] != "budget":
+            return False
+        parent_index = index.parent()
+        if not parent_index.isValid():
+            return False
+        label_index = parent_index.siblingAtColumn(0)
+        if not label_index.isValid():
+            label_index = parent_index
+        parent_meta = label_index.data(Qt.ItemDataRole.UserRole)
+        if not parent_meta or not isinstance(parent_meta, tuple):
+            return False
+        if parent_meta[0] != "category_label":
+            return False
+        depth = parent_meta[2] if len(parent_meta) > 2 else 0
+        return (depth or 0) == 0
+
     def paint(self, painter, option, index):
         meta = index.data(Qt.ItemDataRole.UserRole)
         if not meta or not isinstance(meta, tuple) or meta[0] != "budget":
+            super().paint(painter, option, index)
+            return
+        if self._is_main_category_budget(index):
             super().paint(painter, option, index)
             return
 
@@ -99,6 +122,8 @@ class ButtonDelegate(QStyledItemDelegate):
     def editorEvent(self, event, model, option, index):
         meta = index.data(Qt.ItemDataRole.UserRole)
         if not meta or not isinstance(meta, tuple) or meta[0] != "budget":
+            return super().editorEvent(event, model, option, index)
+        if self._is_main_category_budget(index):
             return super().editorEvent(event, model, option, index)
 
         button_rect = self._button_rect(option, index)
