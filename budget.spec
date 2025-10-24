@@ -1,11 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+BASE_DIR = Path.cwd()
+ICON_FILE = str((BASE_DIR / "money.ico").resolve())
 
 
 a = Analysis(
     ['budget.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('money.png', '.'),
+        ('money.ico', '.'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -23,6 +30,7 @@ exe = EXE(
     a.datas,
     [],
     name='budget',
+    icon=ICON_FILE,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

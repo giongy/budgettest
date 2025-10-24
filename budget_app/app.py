@@ -49,6 +49,13 @@ ITALIAN_MONTH_NAMES = {
 }
 
 
+def get_resource_path(name: str) -> Path:
+    """Return resource path, compatible with PyInstaller one-file bundles."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / name  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent.parent / name
+
+
 def format_diff_value(value: float) -> str:
     return "0" if abs(value) < 1e-6 else f"{value:,.2f}"
 
@@ -141,7 +148,7 @@ class BudgetApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Budget Manager - Luca")
-        icon_path = Path(__file__).resolve().parent.parent / "money.png"
+        icon_path = get_resource_path("money.png")
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         screen = QApplication.primaryScreen().availableGeometry()
@@ -1120,7 +1127,7 @@ class BudgetApp(QWidget):
 
 def main():
     app = QApplication(sys.argv)
-    icon_path = Path(__file__).resolve().parent.parent / "money.png"
+    icon_path = get_resource_path("money.png")
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
     w = BudgetApp()
