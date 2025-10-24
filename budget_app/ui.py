@@ -253,7 +253,7 @@ class SummaryHeaderView(QHeaderView):
         painter.fillRect(summary_rect, brush)
         divider_pen = QPen(QColor("#02070F"), 2)
         painter.setPen(divider_pen)
-        painter.drawLine(summary_rect.topLeft(), summary_rect.topRight())
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         painter.setPen(QPen(QColor('#111')))
         painter.setFont(self._summary_font)
         painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
