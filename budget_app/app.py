@@ -140,7 +140,7 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
 class BudgetApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Budget Manager - Tema Chiaro")
+        self.setWindowTitle("Budget Manager - Luca")
         icon_path = Path(__file__).resolve().parent.parent / "money.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -555,14 +555,7 @@ class BudgetApp(QWidget):
             diff_row = [make_item("Diff", False)]
             diff_font = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
             diff_font.setItalic(True)
-            total_diff = 0.0
-            year_diff = (
-                actual_map.get((cid, header_ids[0]), 0.0) - budget_map.get((cid, header_ids[0]), (0.0,))[0]
-            )
-            year_cell = make_item(format_diff_value(year_diff), False)
-            year_cell.setFont(diff_font)
-            year_cell.setBackground(diff_background(year_diff))
-            diff_row.append(year_cell)
+            diff_row.append(make_item("", False))
             diff_row.append(make_item("", False))
             for bid in header_ids[1:]:
                 a = actual_map.get((cid, bid), 0.0)
@@ -570,7 +563,6 @@ class BudgetApp(QWidget):
                 if b is None:
                     b = budget_map.get((cid, bid), (0.0,))[0] or 0.0
                 d = a - b
-                total_diff += d
                 cell = make_item(format_diff_value(d), False)
                 cell.setFont(diff_font)
                 cell.setBackground(diff_background(d))
@@ -776,26 +768,21 @@ class BudgetApp(QWidget):
                         tot_item.setBackground(QBrush())
 
             # Recompute Diff row
-            # Year diff
-            year_act = actual_map.get((cid, year_bid), 0.0)
-            year_bud = year_amt or 0.0
-            year_diff = year_act - year_bud
             year_cell = target.child(diff_row_idx, 1)
             if year_cell:
-                year_cell.setText(format_diff_value(year_diff))
-                f = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
-                f.setItalic(True)
-                year_cell.setFont(f)
-                year_cell.setBackground(diff_background(year_diff))
+                year_cell.setText("")
+                year_cell.setBackground(QBrush())
+            period_cell = target.child(diff_row_idx, 2)
+            if period_cell:
+                period_cell.setText("")
+                period_cell.setBackground(QBrush())
             # monthly diffs
-            total_diff = 0.0
             for idx, bid in enumerate(month_bids, start=3):
                 a = actual_map.get((cid, bid), 0.0)
                 b = monthly_value_for_diff.get(bid)
                 if b is None:
                     b = base_budget_map.get((cid, bid), (0.0,))[0] or 0.0
                 d = a - b
-                total_diff += d
                 cell = target.child(diff_row_idx, idx)
                 if cell:
                     cell.setText(format_diff_value(d))
