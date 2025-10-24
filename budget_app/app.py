@@ -388,6 +388,11 @@ class BudgetApp(QWidget):
             QHeaderView::section { background-color: #f2f2f2; color: #111; font-weight: bold; font-size: 11px; }
             QHeaderView::section:last { border-left: 1px solid #000; }
             QTreeView { alternate-background-color: #fafafa; gridline-color: #eee; font-size: 11px; }
+            QScrollBar:vertical { background: #f4f5f8; width: 12px; margin: 2px 0 2px 0; border-radius: 6px; }
+            QScrollBar::handle:vertical { background: #bfc6d4; min-height: 24px; border-radius: 6px; }
+            QScrollBar::handle:vertical:hover { background: #a6aec0; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
             """
         )
 
