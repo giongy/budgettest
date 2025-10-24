@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTreeView, QHeaderView, QMessageBox, QFileDialog,
     QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
 )
-from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush
+from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon
 from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -141,6 +141,9 @@ class BudgetApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Budget Manager - Tema Chiaro")
+        icon_path = Path(__file__).resolve().parent.parent / "money.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         screen = QApplication.primaryScreen().availableGeometry()
         width = int(screen.width() * WINDOW_SCALE_RATIO)
         height = int(screen.height() * WINDOW_SCALE_RATIO)
@@ -1074,6 +1077,9 @@ class BudgetApp(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+    icon_path = Path(__file__).resolve().parent.parent / "money.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     w = BudgetApp()
     w.show()
     sys.exit(app.exec())
