@@ -628,56 +628,107 @@ class BudgetApp(QWidget):
         budget_expense = totals["budget_expense"]  # negative
 
         actual_bars = [
-            ("Entrate", actual_income, "#2e7d32"),
-            ("Uscite", abs(actual_expense), "#c62828"),
-            ("Differenza", actual_income + actual_expense, "#1565c0"),
+            ("Entrate", actual_income, "#2c7a7b"),
+            ("Uscite", abs(actual_expense), "#dd3b50"),
+            ("Differenza", actual_income + actual_expense, "#3358c4"),
         ]
         budget_bars = [
-            ("Entrate", budget_income, "#81c784"),
-            ("Uscite", abs(budget_expense), "#ef5350"),
-            ("Differenza", budget_income + budget_expense, "#5e35b1"),
+            ("Entrate", budget_income, "#5bc8b2"),
+            ("Uscite", abs(budget_expense), "#ff8a80"),
+            ("Differenza", budget_income + budget_expense, "#7a7cff"),
         ]
 
+        magnitude_values = [abs(v) for _, v, _ in actual_bars + budget_bars]
+        max_limit = max(magnitude_values or [1.0]) or 1.0
+        offset = max_limit * 0.035
+
         self.figure.clear()
-        ax_actual = self.figure.add_subplot(1, 2, 1)
-        ax_budget = self.figure.add_subplot(1, 2, 2)
+        self.figure.set_facecolor("#f6f7fb")
+        grid = self.figure.add_gridspec(1, 3, width_ratios=[1, 0.12, 1])
+        ax_actual = self.figure.add_subplot(grid[0, 0])
+        ax_budget = self.figure.add_subplot(grid[0, 2])
 
         def render_panel(ax, title, items):
             labels = [lbl for lbl, _, _ in items]
             values = [val for _, val, _ in items]
             colors = [clr for _, _, clr in items]
-            y_pos = list(range(len(items)))
-            ax.barh(y_pos, values, color=colors)
-            ax.set_yticks(y_pos)
-            ax.set_yticklabels(labels, fontsize=9)
-            ax.axvline(0, color="#444", linewidth=0.8)
-            ax.set_title(title, fontsize=11)
-            max_width = max((abs(v) for v in values), default=1.0) or 1.0
-            offset = max_width * 0.03
-            for idx, value in enumerate(values):
-                x_pos = value + offset if value >= 0 else value - offset
+            y_pos = range(len(items))
+
+            ax.set_facecolor("#ffffff")
+            bars = ax.barh(
+                y_pos,
+                values,
+                height=0.55,
+                color=colors,
+                edgecolor="#d2d8e5",
+                linewidth=0.6,
+            )
+            ax.set_yticks(list(y_pos))
+            ax.set_yticklabels(labels, fontsize=9, color="#1f2933")
+            ax.tick_params(axis="y", length=0)
+            ax.tick_params(axis="x", colors="#6b7280", labelsize=8, pad=2)
+            ax.set_title(title, fontsize=10, fontweight="bold", color="#1f2937", pad=6)
+
+            ax.grid(axis="x", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
+            ax.set_axisbelow(True)
+            ax.axvline(0, color="#94a3b8", linewidth=1.0, alpha=0.8)
+
+            limit = max_limit * 1.18
+            ax.set_xlim(-limit, limit)
+            ax.set_xlabel("")
+
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+            for idx, (bar, (_, value, _)) in enumerate(zip(bars, items)):
+                width = bar.get_width()
+                if abs(width) < 1e-8:
+                    continue
+                inner_threshold = limit * 0.12
+                show_inside = abs(width) > inner_threshold
+                if width >= 0:
+                    if show_inside:
+                        x_pos = width - offset
+                        ha = "right"
+                        text_color = "#f8fafc"
+                    else:
+                        x_pos = width + offset
+                        ha = "left"
+                        text_color = "#1f2937"
+                else:
+                    if show_inside:
+                        x_pos = width + offset
+                        ha = "left"
+                        text_color = "#f8fafc"
+                    else:
+                        x_pos = width - offset
+                        ha = "right"
+                        text_color = "#991b1b"
                 ax.text(
                     x_pos,
-                    idx,
+                    bar.get_y() + bar.get_height() / 2,
                     f"{value:,.2f}",
                     va="center",
-                    ha="left" if value >= 0 else "right",
-                    fontsize=8,
+                    ha=ha,
+                    fontsize=9,
+                    fontweight="bold",
+                    color=text_color,
                 )
-            ax.set_xlim(-max_width * 1.3, max_width * 1.3)
-            ax.set_xlabel("Valore", fontsize=9)
+            ax.margins(y=0.28)
+            ax.text(
+                ax.get_xlim()[1],
+                -0.7,
+                "Valore (EUR)",
+                fontsize=7,
+                color="#4b5563",
+                ha="right",
+                va="top",
+            )
 
         render_panel(ax_actual, "Actual", actual_bars)
         render_panel(ax_budget, "Budget", budget_bars)
 
-        max_limit = max(
-            [abs(v) for _, v, _ in actual_bars + budget_bars],
-            default=1.0,
-        ) or 1.0
-        for ax in (ax_actual, ax_budget):
-            ax.set_xlim(-max_limit * 1.3, max_limit * 1.3)
-
-        self.figure.tight_layout()
+        self.figure.subplots_adjust(left=0.12, right=0.88, top=0.88, bottom=0.24, wspace=0.0)
         self.canvas.draw_idle()
 
     def recalc_category(self, cid: int):
