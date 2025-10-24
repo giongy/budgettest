@@ -33,6 +33,21 @@ from .style import (
     CHART_HEIGHT,
 )
 
+ITALIAN_MONTH_NAMES = {
+    "01": "Gennaio",
+    "02": "Febbraio",
+    "03": "Marzo",
+    "04": "Aprile",
+    "05": "Maggio",
+    "06": "Giugno",
+    "07": "Luglio",
+    "08": "Agosto",
+    "09": "Settembre",
+    "10": "Ottobre",
+    "11": "Novembre",
+    "12": "Dicembre",
+}
+
 
 def format_diff_value(value: float) -> str:
     return "0" if abs(value) < 1e-6 else f"{value:,.2f}"
@@ -272,6 +287,12 @@ class BudgetApp(QWidget):
         elided = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, available)
         self.db_label.setText(elided)
 
+    def _display_header_name(self, raw: str) -> str:
+        if isinstance(raw, str) and len(raw) == 7 and raw[4] == "-":
+            month_code = raw[5:]
+            return ITALIAN_MONTH_NAMES.get(month_code, raw)
+        return raw
+
     def _apply_column_widths(self, header_names):
         header = self.view.header()
         for col, name in enumerate(header_names):
@@ -378,11 +399,11 @@ class BudgetApp(QWidget):
         header_ids = []
         if entries:
             year_id, year_name = entries[0]
-            header_names.append(year_name)
+            header_names.append(self._display_header_name(year_name))
             header_names.append("Period")
             header_ids.append(year_id)
             for bid, name in entries[1:]:
-                header_names.append(name)
+                header_names.append(self._display_header_name(name))
                 header_ids.append(bid)
         header_names.append("TOTAL")
         self.current_headers = header_names[:]
