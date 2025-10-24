@@ -691,15 +691,24 @@ class BudgetApp(QWidget):
                 width = bar.get_width()
                 if abs(width) < 1e-8:
                     continue
+                magnitude = abs(value)
+                text = f"{value:,.2f}"
+                digits = len(f"{int(magnitude)}")
+                estimated_text_w = max(len(text) * 0.014, 0.08)
                 inner_threshold = limit * 0.12
-                show_inside = abs(width) > inner_threshold
+                min_inside = max(inner_threshold, estimated_text_w)
+                show_inside = abs(width) > min_inside
+
+                # Adjust offset if the space outside is limited
+                outside_pad = max(offset, estimated_text_w * 0.4)
+
                 if width >= 0:
                     if show_inside:
                         x_pos = width - offset
                         ha = "right"
                         text_color = "#f8fafc"
                     else:
-                        x_pos = width + offset
+                        x_pos = width + outside_pad
                         ha = "left"
                         text_color = "#1f2937"
                 else:
@@ -708,13 +717,13 @@ class BudgetApp(QWidget):
                         ha = "left"
                         text_color = "#f8fafc"
                     else:
-                        x_pos = width - offset
+                        x_pos = width - outside_pad
                         ha = "right"
                         text_color = "#991b1b"
                 ax.text(
                     x_pos,
                     bar.get_y() + bar.get_height() / 2,
-                    f"{value:,.2f}",
+                    text,
                     va="center",
                     ha=ha,
                     fontsize=9,
