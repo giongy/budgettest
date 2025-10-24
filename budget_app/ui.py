@@ -5,15 +5,16 @@ from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter,
 from PyQt6.QtCore import Qt, QRect, QSize, QEvent
 
 from .config import PERIOD_CHOICES
+from .style import UI_FONT_FAMILY, UI_BASE_FONT_SIZE, UI_BOLD_FONT_SIZE, SUMMARY_FONT_SIZE
 
 
 def make_item(text="", editable=False, meta=None, bold=False, color=None):
     item = QStandardItem(str(text))
     item.setEditable(editable)
-    font = QFont("Segoe UI", 8)
+    font = QFont(UI_FONT_FAMILY, UI_BASE_FONT_SIZE)
     if bold:
         font.setBold(True)
-        font.setPointSize(9)
+        font.setPointSize(UI_BOLD_FONT_SIZE)
     item.setFont(font)
     if color:
         item.setForeground(QBrush(color))
@@ -170,7 +171,7 @@ class ButtonDelegate(QStyledItemDelegate):
 
 
 class DividerDelegate(QStyledItemDelegate):
-    def __init__(self, parent, *, line_color: QColor | Qt.GlobalColor = Qt.GlobalColor.black, line_width: int = 1):
+    def __init__(self, parent, *, line_color: QColor | Qt.GlobalColor = Qt.GlobalColor.black, line_width: int = 2):
         super().__init__(parent)
         self.line_color = QColor(line_color)
         self.line_width = line_width
@@ -193,7 +194,7 @@ class SummaryHeaderView(QHeaderView):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] = {}
         self._summary_height = 18
-        self._summary_font = QFont("Segoe UI", 8)
+        self._summary_font = QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE)
         self._summary_font.setBold(True)
         self.setSectionsClickable(True)
 
@@ -250,7 +251,7 @@ class SummaryHeaderView(QHeaderView):
         summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
         painter.save()
         painter.fillRect(summary_rect, brush)
-        divider_pen = QPen(QColor('#9CA3AF'), 1)
+        divider_pen = QPen(QColor("#02070F"), 2)
         painter.setPen(divider_pen)
         painter.drawLine(summary_rect.topLeft(), summary_rect.topRight())
         painter.setPen(QPen(QColor('#111')))

@@ -19,13 +19,17 @@ from .repository import (
     upsert_budget_entry,
 )
 from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView
-CATEGORY_COLUMN_WIDTH = 250  # width for category/label column
-PERIOD_COLUMN_WIDTH = 60     # width for the period column
-NUMERIC_COLUMN_WIDTH = 80    # width for budget/actual numeric columns (adjust to taste)
-MIN_COLUMN_WIDTH = 10        # hard floor so small widths like 20 stay effective
-MAIN_CATEGORY_BG = QColor("#D6E8FF")  # light blue background for main categories
-DIFF_POSITIVE_COLOR = QColor("#BDEDB8")
-DIFF_NEGATIVE_COLOR = QColor("#F8C8C8")
+from .style import (
+    CATEGORY_COLUMN_WIDTH,
+    PERIOD_COLUMN_WIDTH,
+    NUMERIC_COLUMN_WIDTH,
+    MIN_COLUMN_WIDTH,
+    MAIN_CATEGORY_BG,
+    DIFF_POSITIVE_COLOR,
+    DIFF_NEGATIVE_COLOR,
+    UI_FONT_FAMILY,
+    DIFF_FONT_SIZE,
+)
 
 
 def format_diff_value(value: float) -> str:
@@ -449,7 +453,7 @@ class BudgetApp(QWidget):
 
             # Diff row
             diff_row = [make_item("Diff", False)]
-            diff_font = QFont("Segoe UI", 9)
+            diff_font = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
             diff_font.setItalic(True)
             total_diff = 0.0
             year_diff = (
@@ -683,7 +687,7 @@ class BudgetApp(QWidget):
             year_cell = target.child(diff_row_idx, 1)
             if year_cell:
                 year_cell.setText(format_diff_value(year_diff))
-                f = QFont("Segoe UI", 9)
+                f = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
                 f.setItalic(True)
                 year_cell.setFont(f)
                 year_cell.setBackground(diff_background(year_diff))
@@ -699,7 +703,7 @@ class BudgetApp(QWidget):
                 cell = target.child(diff_row_idx, idx)
                 if cell:
                     cell.setText(format_diff_value(d))
-                    f = QFont("Segoe UI", 9)
+                    f = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
                     f.setItalic(True)
                     cell.setFont(f)
                     cell.setBackground(diff_background(d))
@@ -710,7 +714,7 @@ class BudgetApp(QWidget):
                     total_act += actual_map.get((cid, bid), 0.0)
                 total_diff_adjusted = total_act - display_total
                 tot_diff_cell.setText(format_diff_value(total_diff_adjusted))
-                f = QFont("Segoe UI", 9)
+                f = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
                 f.setItalic(True)
                 tot_diff_cell.setFont(f)
                 tot_diff_cell.setBackground(diff_background(total_diff_adjusted))
