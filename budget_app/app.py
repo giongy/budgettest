@@ -147,15 +147,15 @@ class BudgetApp(QWidget):
         control_layout.setContentsMargins(10, 6, 10, 6)
         control_layout.setSpacing(12)
 
-        self.db_label = QLabel()
-        self.db_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.db_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        control_layout.addWidget(self.db_label, stretch=1)
-
         self.select_db_btn = QPushButton("Select DB")
         self.select_db_btn.setMinimumWidth(100)
         self.select_db_btn.clicked.connect(self.select_db)
         control_layout.addWidget(self.select_db_btn)
+
+        self.db_label = QLabel()
+        self.db_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.db_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        control_layout.addWidget(self.db_label, stretch=1)
 
         year_label = QLabel("Year:")
         control_layout.addWidget(year_label)
@@ -175,6 +175,10 @@ class BudgetApp(QWidget):
 
         self.save_btn = QPushButton("Save Budgets")
         self.save_btn.setMinimumWidth(120)
+        self.save_btn.setStyleSheet(
+            "QPushButton { background-color: #ffeb3b; border: 1px solid #bfa400; color: #000; font-weight: bold; } "
+            "QPushButton:hover { background-color: #ffe066; }"
+        )
         self.save_btn.clicked.connect(self.save_budgets)
         control_layout.addWidget(self.save_btn)
 
