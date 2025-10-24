@@ -4,7 +4,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QTreeView, QHeaderView, QMessageBox, QFileDialog,
-    QSizePolicy, QAbstractItemView, QToolButton, QStyle,
+    QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
 )
 from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush
 from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
@@ -137,27 +137,47 @@ class BudgetApp(QWidget):
         self._recalc_guard = False  # prevents saving of auto-calculated updates
 
         layout = QVBoxLayout(self)
-        self.db_label = QLabel(f"Database: {config.DB_PATH}")
-        layout.addWidget(self.db_label)
 
-        top = QHBoxLayout()
+        self.control_frame = QFrame()
+        self.control_frame.setObjectName("controlPanel")
+        self.control_frame.setStyleSheet(
+            "#controlPanel { border: 2px solid #000; border-radius: 6px; background-color: #f6f7fb; }"
+        )
+        control_layout = QHBoxLayout(self.control_frame)
+        control_layout.setContentsMargins(10, 6, 10, 6)
+        control_layout.setSpacing(12)
+
+        self.db_label = QLabel()
+        self.db_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.db_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        control_layout.addWidget(self.db_label, stretch=1)
+
         self.select_db_btn = QPushButton("Select DB")
+        self.select_db_btn.setMinimumWidth(100)
         self.select_db_btn.clicked.connect(self.select_db)
-        top.addWidget(self.select_db_btn)
-        top.addWidget(QLabel("Year:"))
+        control_layout.addWidget(self.select_db_btn)
+
+        year_label = QLabel("Year:")
+        control_layout.addWidget(year_label)
         self.year_cb = QComboBox()
         self.year_cb.addItems(self.years or [])
+        self.year_cb.setMinimumWidth(110)
         last_year = config.load_last_budget_year()
         if last_year and last_year in (self.years or []):
             self.year_cb.setCurrentText(last_year)
         self.year_cb.currentTextChanged.connect(self._on_year_changed)
-        top.addWidget(self.year_cb)
+        control_layout.addWidget(self.year_cb)
+
         self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setMinimumWidth(100)
         self.refresh_btn.clicked.connect(self.refresh)
-        top.addWidget(self.refresh_btn)
+        control_layout.addWidget(self.refresh_btn)
+
         self.save_btn = QPushButton("Save Budgets")
+        self.save_btn.setMinimumWidth(120)
         self.save_btn.clicked.connect(self.save_budgets)
-        top.addWidget(self.save_btn)
+        control_layout.addWidget(self.save_btn)
+
         # Expand/Collapse all main categories
         self.expand_all_btn = QToolButton()
         self.expand_all_btn.setAutoRaise(True)
@@ -167,7 +187,7 @@ class BudgetApp(QWidget):
         self.expand_all_btn.setIconSize(QSize(14, 14))
         self.expand_all_btn.setFixedSize(QSize(22, 22))
         self.expand_all_btn.clicked.connect(self.expand_all_main)
-        top.addWidget(self.expand_all_btn)
+        control_layout.addWidget(self.expand_all_btn)
         self.collapse_all_btn = QToolButton()
         self.collapse_all_btn.setAutoRaise(True)
         self.collapse_all_btn.setToolTip("Collapse all categories")
@@ -176,8 +196,9 @@ class BudgetApp(QWidget):
         self.collapse_all_btn.setIconSize(QSize(14, 14))
         self.collapse_all_btn.setFixedSize(QSize(22, 22))
         self.collapse_all_btn.clicked.connect(self.collapse_all_main)
-        top.addWidget(self.collapse_all_btn)
-        layout.addLayout(top)
+        control_layout.addWidget(self.collapse_all_btn)
+
+        layout.addWidget(self.control_frame)
 
         self.figure = Figure(figsize=(6, CHART_HEIGHT / 100), dpi=100)
         self.canvas = FigureCanvasQTAgg(self.figure)
@@ -209,12 +230,43 @@ class BudgetApp(QWidget):
         self.view.doubleClicked.connect(self.on_view_double_clicked)
         self.current_headers: list[str] = []
         self.apply_light_theme()
+        self._db_label_fulltext = ""
+        self._set_db_path_label(config.DB_PATH)
+        QTimer.singleShot(0, self._update_db_label_text)
         self.refresh()
 
     def showEvent(self, event):
         super().showEvent(event)
         # Redraw charts once the widget has a real size; avoids narrow plots on first load
         QTimer.singleShot(0, self.update_summary_chart)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_db_label_text()
+
+    def _set_db_path_label(self, path: Path | str | None):
+        display_path = str(path) if path else "--"
+        full_text = f"Database: {display_path}"
+        self._db_label_fulltext = full_text
+        tooltip = display_path if path else "Nessun database selezionato"
+        self.db_label.setToolTip(tooltip)
+        self._update_db_label_text()
+
+    def _update_db_label_text(self):
+        if not hasattr(self, "db_label"):
+            return
+        full_text = getattr(self, "_db_label_fulltext", "")
+        if not full_text:
+            self.db_label.setText("")
+            return
+        available = max(self.db_label.width() - 6, 0)
+        if available <= 0:
+            self.db_label.setText(full_text)
+            QTimer.singleShot(0, self._update_db_label_text)
+            return
+        metrics = self.db_label.fontMetrics()
+        elided = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, available)
+        self.db_label.setText(elided)
 
     def _apply_column_widths(self, header_names):
         header = self.view.header()
@@ -974,7 +1026,7 @@ class BudgetApp(QWidget):
         if file:
             config.DB_PATH = Path(file)
             config.save_last_db(config.DB_PATH)
-            self.db_label.setText(f"Database: {config.DB_PATH}")
+            self._set_db_path_label(config.DB_PATH)
             self.years, self.per_year_entries, self.name_to_id = load_budgetyear_map()
             self.id2name, self.children_map, self.root_ids = load_categories()
             saved_year = config.load_last_budget_year()
