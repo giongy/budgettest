@@ -1,4 +1,5 @@
 ﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader
+from PyQt6.QtWidgets import QTreeView
 from pathlib import Path
 
 from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen
@@ -222,10 +223,21 @@ class SummaryHeaderView(QHeaderView):
         self._summary_font = QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE)
         self._summary_font.setBold(True)
         self.setSectionsClickable(True)
+        self._highlighted_sections: set[int] = set()
+        self._highlight_pen = QPen(QColor('#000'))
+        self._highlight_pen.setWidth(2)
+        self._highlight_pen.setCosmetic(True)
 
     def set_summary(self, summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] | None):
         self._summary = summary or {}
         self.updateGeometry()
+        self.viewport().update()
+
+    def set_highlighted_sections(self, sections: set[int] | list[int] | tuple[int, ...] | None):
+        new_set = set(sections or [])
+        if new_set == self._highlighted_sections:
+            return
+        self._highlighted_sections = new_set
         self.viewport().update()
 
     def sizeHint(self):
@@ -246,45 +258,98 @@ class SummaryHeaderView(QHeaderView):
         option.rect = rect
         option.section = logicalIndex
         option.textAlignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        # Retrieve label text
         try:
             header_text = self.model().headerData(logicalIndex, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
         except Exception:
             header_text = None
         option.text = str(header_text) if header_text is not None else option.text
-        # Draw section background/borders
         self.style().drawControl(QStyle.ControlElement.CE_HeaderSection, option, painter, self)
-        # Draw the month/label in the upper band
         base_size = self.sectionSizeFromContents(logicalIndex)
         label_h = max(14, min(base_size.height(), rect.height()))
         label_rect = QRect(rect.left(), rect.top(), rect.width(), label_h)
         label_opt = QStyleOptionHeader(option)
         label_opt.rect = label_rect
         self.style().drawControl(QStyle.ControlElement.CE_HeaderLabel, label_opt, painter, self)
-        # Summary band at the bottom
+
         summary = self._summary.get(logicalIndex)
-        if not summary:
+        if summary:
+            if len(summary) == 3:
+                text, brush, alignment = summary
+            else:
+                text, brush = summary
+                alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            summary_h = rect.height() - label_h
+            if summary_h > 2:
+                summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
+                painter.save()
+                painter.fillRect(summary_rect, brush)
+                divider_pen = QPen(QColor('#02070F'), 2)
+                painter.setPen(divider_pen)
+                painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+                painter.setPen(QPen(QColor('#111')))
+                painter.setFont(self._summary_font)
+                painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
+                painter.restore()
+
+        if logicalIndex in self._highlighted_sections:
+            painter.save()
+            painter.setPen(self._highlight_pen)
+            painter.drawLine(rect.left(), rect.top(), rect.left(), rect.bottom())
+            painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
+            painter.restore()
+
+
+class BudgetTreeView(QTreeView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._highlighted_columns: set[int] = set()
+        self._highlight_pen = QPen(QColor('#000'))
+        self._highlight_pen.setWidth(2)
+        self._highlight_pen.setCosmetic(True)
+
+    def highlighted_columns(self) -> set[int]:
+        return set(self._highlighted_columns)
+
+    def clear_highlighted_columns(self):
+        if not self._highlighted_columns:
             return
-        if len(summary) == 3:
-            text, brush, alignment = summary
-        else:
-            text, brush = summary
-            alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        summary_h = rect.height() - label_h
-        if summary_h <= 2:
+        self._highlighted_columns.clear()
+        self.viewport().update()
+
+    def toggle_highlight_column(self, column: int) -> bool:
+        if column in self._highlighted_columns:
+            self._highlighted_columns.remove(column)
+            self.viewport().update()
+            return False
+        self._highlighted_columns.add(column)
+        self.viewport().update()
+        return True
+
+    def set_highlighted_columns(self, columns: set[int] | list[int] | tuple[int, ...] | None):
+        new_set = set(columns or [])
+        if new_set == self._highlighted_columns:
             return
-        summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
-        painter.save()
-        painter.fillRect(summary_rect, brush)
-        divider_pen = QPen(QColor("#02070F"), 2)
-        painter.setPen(divider_pen)
-        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-        painter.setPen(QPen(QColor('#111')))
-        painter.setFont(self._summary_font)
-        painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
-        painter.restore()
+        self._highlighted_columns = new_set
+        self.viewport().update()
 
-
-
-
-
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._highlighted_columns:
+            return
+        header = self.header()
+        if header is None:
+            return
+        painter = QPainter(self.viewport())
+        painter.setPen(self._highlight_pen)
+        height = self.viewport().height()
+        width_limit = self.viewport().width()
+        for column in self._highlighted_columns:
+            if self.isColumnHidden(column):
+                continue
+            x = header.sectionViewportPosition(column)
+            size = header.sectionSize(column)
+            if size <= 0 or x >= width_limit or (x + size) <= 0:
+                continue
+            painter.drawLine(x, 0, x, height)
+            painter.drawLine(x + size - 1, 0, x + size - 1, height)
+        painter.end()

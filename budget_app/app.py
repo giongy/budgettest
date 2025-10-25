@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QTreeView, QHeaderView, QMessageBox, QFileDialog,
+    QPushButton, QHeaderView, QMessageBox, QFileDialog,
     QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
 )
 from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon
@@ -19,7 +19,7 @@ from .repository import (
     upsert_budget_entry,
     delete_budget_entry,
 )
-from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView
+from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView, BudgetTreeView
 from .style import (
     CATEGORY_COLUMN_WIDTH,
     PERIOD_COLUMN_WIDTH,
@@ -239,9 +239,10 @@ class BudgetApp(QWidget):
         self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.canvas)
 
-        self.view = QTreeView()
+        self.view = BudgetTreeView()
         self.summary_header = SummaryHeaderView(self.view)
         self.view.setHeader(self.summary_header)
+        self.summary_header.sectionDoubleClicked.connect(self._on_header_section_double_clicked)
         self.model = QStandardItemModel()
         self.view.setModel(self.model)
         self.view.setEditTriggers(
@@ -412,6 +413,8 @@ class BudgetApp(QWidget):
         year = self.year_cb.currentText()
         if not year:
             return
+        self.view.clear_highlighted_columns()
+        self.summary_header.set_highlighted_sections(set())
 
         entries = self.per_year_entries.get(year, [])
         header_names = ["Category / RowType"]
@@ -1085,6 +1088,20 @@ class BudgetApp(QWidget):
             self.refresh()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def _on_header_section_double_clicked(self, logical_index: int):
+        if not self.current_headers:
+            return
+        if logical_index < 0 or logical_index >= len(self.current_headers):
+            return
+        if logical_index < 3 or logical_index >= len(self.current_headers) - 1:
+            return
+        header_name = self.current_headers[logical_index]
+        if header_name in ("Period", "TOTAL"):
+            return
+        self.view.toggle_highlight_column(logical_index)
+        highlights = self.view.highlighted_columns()
+        self.summary_header.set_highlighted_sections(highlights)
 
     def on_view_double_clicked(self, index):
         try:
