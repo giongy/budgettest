@@ -25,6 +25,7 @@ STYLE_DEFAULTS: dict[str, Any] = {
     "main_category_bg": "#7FB2F5",
     "diff_positive_color": "#97F18D",
     "diff_negative_color": "#F18686",
+    "calculated_budget_color": "#B0B7C3",
     "ui_font_family": "Segoe UI",
     "ui_base_font_size": 10,
     "ui_bold_font_size": 10,

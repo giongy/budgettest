@@ -14,6 +14,7 @@ MIN_COLUMN_WIDTH = _STYLE["min_column_width"]
 MAIN_CATEGORY_BG = QColor(_STYLE["main_category_bg"])
 DIFF_POSITIVE_COLOR = QColor(_STYLE["diff_positive_color"])
 DIFF_NEGATIVE_COLOR = QColor(_STYLE["diff_negative_color"])
+CALCULATED_BUDGET_COLOR = QColor(_STYLE["calculated_budget_color"])
 
 # Font settings
 UI_FONT_FAMILY = _STYLE["ui_font_family"]

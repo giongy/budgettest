@@ -29,9 +29,12 @@ from .style import (
     DIFF_POSITIVE_COLOR,
     DIFF_NEGATIVE_COLOR,
     UI_FONT_FAMILY,
+    UI_BASE_FONT_SIZE,
+    UI_BOLD_FONT_SIZE,
     DIFF_FONT_SIZE,
     WINDOW_SCALE_RATIO,
     CHART_HEIGHT,
+    CALCULATED_BUDGET_COLOR,
 )
 
 ITALIAN_MONTH_NAMES = {
@@ -546,13 +549,14 @@ class BudgetApp(QWidget):
             for bid in month_bids:
                 val = monthly_value_for_diff.get(bid, 0.0)
                 is_explicit = bid in explicit_bids
-                color = QColor("#01579b") if is_explicit else QColor("#6b7280") if val else QColor("#4b5563")
+                color = QColor("#01579b") if is_explicit else CALCULATED_BUDGET_COLOR
                 text = format_diff_value(val) if (val or is_explicit) else ""
                 bud_row.append(
                     make_item(
                         text,
                         True,
                         ("budget", cid, bid),
+                        bold=not is_explicit,
                         color=color,
                     )
                 )
@@ -855,11 +859,19 @@ class BudgetApp(QWidget):
             for idx, bid in enumerate(month_bids, start=3):
                 val = monthly_value_for_diff.get(bid, 0.0)
                 is_explicit = bid in explicit_bids
-                color = QColor("#01579b") if is_explicit else QColor("#6b7280") if val else QColor("#4b5563")
+                color = QColor("#01579b") if is_explicit else CALCULATED_BUDGET_COLOR
                 item = target.child(budget_row_idx, idx)
                 if item:
                     item.setText(format_diff_value(val) if (val or is_explicit) else "")
                     item.setForeground(QBrush(color))
+                    font = item.font()
+                    if is_explicit:
+                        font.setBold(False)
+                        font.setPointSize(UI_BASE_FONT_SIZE)
+                    else:
+                        font.setBold(True)
+                        font.setPointSize(UI_BOLD_FONT_SIZE)
+                    item.setFont(font)
 
             # Update total cell and color
             tot_col = 3 + len(month_bids)
