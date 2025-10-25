@@ -99,7 +99,7 @@ class ButtonDelegate(QStyledItemDelegate):
         if self._pressed == (index.row(), index.column()):
             fill_color = QColor("#cbd5f5")
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            fill_color = QColor("#e0f2fe")
+            fill_color = QColor("#fef3e0")
         else:
             fill_color = QColor("#f3f4f6")
         painter.setPen(Qt.PenStyle.NoPen)
@@ -224,7 +224,7 @@ class SummaryHeaderView(QHeaderView):
         self._summary_font.setBold(True)
         self.setSectionsClickable(True)
         self._highlighted_sections: set[int] = set()
-        self._highlight_pen = QPen(QColor('#000'))
+        self._highlight_pen = QPen(QColor('#673BFF'))
         self._highlight_pen.setWidth(2)
         self._highlight_pen.setCosmetic(True)
 
@@ -303,7 +303,7 @@ class BudgetTreeView(QTreeView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._highlighted_columns: set[int] = set()
-        self._highlight_pen = QPen(QColor('#000'))
+        self._highlight_pen = QPen(QColor('#673BFF'))
         self._highlight_pen.setWidth(2)
         self._highlight_pen.setCosmetic(True)
 

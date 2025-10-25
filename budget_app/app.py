@@ -559,7 +559,7 @@ class BudgetApp(QWidget):
                         text,
                         True,
                         ("budget", cid, bid),
-                        bold=not is_explicit,
+                        bold=False,
                         color=color,
                     )
                 )
@@ -574,7 +574,7 @@ class BudgetApp(QWidget):
             # Diff row
             diff_row = [make_item("Diff", False)]
             diff_font = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
-            diff_font.setItalic(True)
+           # diff_font.setItalic(True)
             diff_row.append(make_item("", False))
             diff_row.append(make_item("", False))
             for bid in header_ids[1:]:
@@ -910,7 +910,7 @@ class BudgetApp(QWidget):
                 if cell:
                     cell.setText(format_diff_value(d))
                     f = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
-                    f.setItalic(True)
+                  #  f.setItalic(True)
                     cell.setFont(f)
                     cell.setBackground(diff_background(d))
             tot_diff_cell = target.child(diff_row_idx, tot_col)
@@ -921,7 +921,7 @@ class BudgetApp(QWidget):
                 total_diff_adjusted = total_act - display_total
                 tot_diff_cell.setText(format_diff_value(total_diff_adjusted))
                 f = QFont(UI_FONT_FAMILY, DIFF_FONT_SIZE)
-                f.setItalic(True)
+               # f.setItalic(True)
                 tot_diff_cell.setFont(f)
                 tot_diff_cell.setBackground(diff_background(total_diff_adjusted))
             if depth == 0 and diff_row_idx is not None:
