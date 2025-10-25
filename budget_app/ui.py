@@ -47,8 +47,8 @@ class ButtonDelegate(QStyledItemDelegate):
         self.view.setMouseTracking(True)
         self.view.viewport().setMouseTracking(True)
         self.callback = callback
-        self.button_size = QSize(16, 16)
-        self.margin = 4
+        self.button_size = QSize(14, 14)
+        self.margin = 2
         self._pressed = None
         icon_path = Path(__file__).resolve().parent.parent / "pari.png"
         self.icon_pixmap = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
@@ -218,7 +218,7 @@ class SummaryHeaderView(QHeaderView):
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] = {}
-        self._summary_height = 18
+        self._summary_height = 24
         self._summary_font = QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE)
         self._summary_font.setBold(True)
         self.setSectionsClickable(True)
