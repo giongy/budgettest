@@ -164,6 +164,15 @@ class BudgetApp(QWidget):
         self.id2name, self.children_map, self.root_ids = load_categories()
         self.edits = {}
         self._recalc_guard = False  # prevents saving of auto-calculated updates
+        self._has_unsaved_changes = False
+        self._save_default_stylesheet = (
+            "QPushButton { background-color: #ffeb3b; border: 1px solid #bfa400; color: #000; font-weight: bold; } "
+            "QPushButton:hover { background-color: #ffe066; }"
+        )
+        self._save_dirty_stylesheet = (
+            "QPushButton { background-color: #c62828; border: 1px solid #8e0000; color: #fff; font-weight: bold; } "
+            "QPushButton:hover { background-color: #d32f2f; }"
+        )
 
         layout = QVBoxLayout(self)
 
@@ -204,10 +213,7 @@ class BudgetApp(QWidget):
 
         self.save_btn = QPushButton("Save Budgets")
         self.save_btn.setMinimumWidth(120)
-        self.save_btn.setStyleSheet(
-            "QPushButton { background-color: #ffeb3b; border: 1px solid #bfa400; color: #000; font-weight: bold; } "
-            "QPushButton:hover { background-color: #ffe066; }"
-        )
+        self._set_unsaved_changes(False)
         self.save_btn.clicked.connect(self.save_budgets)
         control_layout.addWidget(self.save_btn)
 
@@ -268,6 +274,12 @@ class BudgetApp(QWidget):
         self._set_db_path_label(config.DB_PATH)
         QTimer.singleShot(0, self._update_db_label_text)
         self.refresh()
+
+    def _set_unsaved_changes(self, dirty: bool):
+        self._has_unsaved_changes = dirty
+        stylesheet = self._save_dirty_stylesheet if dirty else self._save_default_stylesheet
+        if hasattr(self, "save_btn"):
+            self.save_btn.setStyleSheet(stylesheet)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -410,6 +422,7 @@ class BudgetApp(QWidget):
 
     def refresh(self):
         self.edits.clear()
+        self._set_unsaved_changes(False)
         year = self.year_cb.currentText()
         if not year:
             return
@@ -1029,6 +1042,7 @@ class BudgetApp(QWidget):
             else:
                 period = "Monthly"
             self.edits[(int(bid), int(cid))] = {"amount": val, "period": period}
+            self._set_unsaved_changes(True)
             # Recalculate totals and colors for this category
             self.recalc_category(int(cid))
 
@@ -1060,6 +1074,7 @@ class BudgetApp(QWidget):
 
             item.setBackground(QColor("#FFF3B0"))
             self.edits[(int(bid), int(cid))] = {"period": val, "amount": amount_val}
+            self._set_unsaved_changes(True)
             self.recalc_category(int(cid))
 
     def save_budgets(self):
@@ -1178,6 +1193,32 @@ class BudgetApp(QWidget):
                 ids.add(cid)
         self._collapsed_main = ids
         self._apply_main_collapse_states()
+
+    def closeEvent(self, event):
+        if self.edits:
+            dialog = QMessageBox(self)
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setWindowTitle("Modifiche non salvate")
+            dialog.setText("Ci sono modifiche non salvate.")
+            dialog.setInformativeText("Vuoi salvarle prima di uscire?")
+            save_button = dialog.addButton("Salva", QMessageBox.ButtonRole.AcceptRole)
+            discard_button = dialog.addButton("Esci senza salvare", QMessageBox.ButtonRole.DestructiveRole)
+            cancel_button = dialog.addButton("Annulla", QMessageBox.ButtonRole.RejectRole)
+            dialog.setDefaultButton(save_button)
+            dialog.exec()
+            clicked = dialog.clickedButton()
+            if clicked == save_button:
+                self.save_budgets()
+                if self.edits:
+                    event.ignore()
+                    return
+            elif clicked == cancel_button:
+                event.ignore()
+                return
+            elif clicked != discard_button:
+                event.ignore()
+                return
+        super().closeEvent(event)
 
     def select_db(self):
         file, _ = QFileDialog.getOpenFileName(
