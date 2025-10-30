@@ -28,3 +28,12 @@ WINDOW_SCALE_RATIO = _STYLE["window_scale_ratio"]
 
 # Chart settings
 CHART_HEIGHT = _STYLE["chart_height"]
+
+# Summary header colors
+SUMMARY_ACTUAL_POSITIVE_COLOR = QColor(_STYLE["summary_actual_positive_color"])
+SUMMARY_ACTUAL_NEGATIVE_COLOR = QColor(_STYLE["summary_actual_negative_color"])
+SUMMARY_BUDGET_POSITIVE_COLOR = QColor(_STYLE["summary_budget_positive_color"])
+SUMMARY_BUDGET_NEGATIVE_COLOR = QColor(_STYLE["summary_budget_negative_color"])
+SUMMARY_DIFF_POSITIVE_COLOR = QColor(_STYLE["summary_diff_positive_color"])
+SUMMARY_DIFF_NEGATIVE_BG_COLOR = QColor(_STYLE["summary_diff_negative_bg_color"])
+SUMMARY_DIFF_NEGATIVE_FG_COLOR = QColor(_STYLE["summary_diff_negative_fg_color"])

@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
@@ -35,6 +36,13 @@ from .style import (
     WINDOW_SCALE_RATIO,
     CHART_HEIGHT,
     CALCULATED_BUDGET_COLOR,
+    SUMMARY_ACTUAL_POSITIVE_COLOR,
+    SUMMARY_ACTUAL_NEGATIVE_COLOR,
+    SUMMARY_BUDGET_POSITIVE_COLOR,
+    SUMMARY_BUDGET_NEGATIVE_COLOR,
+    SUMMARY_DIFF_POSITIVE_COLOR,
+    SUMMARY_DIFF_NEGATIVE_BG_COLOR,
+    SUMMARY_DIFF_NEGATIVE_FG_COLOR,
 )
 
 ITALIAN_MONTH_NAMES = {
@@ -338,8 +346,19 @@ class BudgetApp(QWidget):
             config.save_last_budget_year(year)
         self.refresh()
 
-    def _compute_summary_budget_totals(self, header_names: list[str]) -> dict[int, float]:
-        totals: dict[int, float] = {}
+    def _compute_summary_totals(
+        self, header_names: list[str]
+    ) -> dict[int, dict[str, float]]:
+        totals: dict[int, dict[str, float]] = {}
+
+        def _accumulate(value_map: dict[str, float], key: str, text: str | None):
+            raw = (text or "").replace(" ", "").replace(",", "")
+            try:
+                val = float(raw) if raw else 0.0
+            except ValueError:
+                val = 0.0
+            value_map[key] = value_map.get(key, 0.0) + val
+
         root = self.model.invisibleRootItem()
         column_count = self.model.columnCount()
         for r in range(root.rowCount()):
@@ -347,27 +366,36 @@ class BudgetApp(QWidget):
             if not category_item:
                 continue
             budget_row_idx = None
+            actual_row_idx = None
             for rr in range(category_item.rowCount()):
                 label_item = category_item.child(rr, 0)
-                if label_item and label_item.text() == "Budget":
+                if not label_item:
+                    continue
+                label_text = label_item.text()
+                if label_text == "Budget":
                     budget_row_idx = rr
-                    break
-            if budget_row_idx is None:
+                elif label_text == "Actual":
+                    actual_row_idx = rr
+            if budget_row_idx is None and actual_row_idx is None:
                 continue
             for col in range(1, column_count):
                 if col >= len(header_names):
                     continue
                 if header_names[col] == "Period":
                     continue
-                cell = category_item.child(budget_row_idx, col)
-                if not cell:
-                    continue
-                txt = (cell.text() or "").replace(" ", "").replace(",", "")
-                try:
-                    val = float(txt) if txt else 0.0
-                except ValueError:
-                    val = 0.0
-                totals[col] = totals.get(col, 0.0) + val
+                bucket = totals.setdefault(col, {})
+                if budget_row_idx is not None:
+                    cell = category_item.child(budget_row_idx, col)
+                    if cell:
+                        _accumulate(bucket, "budget", cell.text())
+                if actual_row_idx is not None:
+                    cell = category_item.child(actual_row_idx, col)
+                    if cell:
+                        _accumulate(bucket, "actual", cell.text())
+        for data in totals.values():
+            actual_total = data.get("actual", 0.0)
+            budget_total = data.get("budget", 0.0)
+            data["diff"] = actual_total - budget_total
         return totals
 
     def _update_summary_header(self, header_names: list[str] | None = None):
@@ -376,31 +404,97 @@ class BudgetApp(QWidget):
         if not header_names:
             self.summary_header.set_summary({})
             return
-        totals = self._compute_summary_budget_totals(header_names)
-        summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] = {}
-        summary[0] = (
-            "Totale Budget",
-            QBrush(QColor("#E8EAED")),
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        )
+        totals = self._compute_summary_totals(header_names)
+        summary: dict[int, Any] = {}
+        total_col_index = self.model.columnCount() - 1
+        overall_totals = totals.get(total_col_index, {})
+        overall_budget = overall_totals.get("budget", 0.0)
+        overall_actual = overall_totals.get("actual", 0.0)
+        overall_diff = overall_totals.get("diff", overall_actual - overall_budget)
+        summary[0] = {
+            "background": QBrush(QColor("#E8EAED")),
+            "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "lines": [
+                {"text": "ACTUAL", "bg": SUMMARY_ACTUAL_POSITIVE_COLOR},
+                {"text": "BUDGET", "bg": SUMMARY_BUDGET_POSITIVE_COLOR},
+                {"text": "DIFF", "bg": SUMMARY_DIFF_POSITIVE_COLOR},
+            ],
+        }
         for col in range(1, len(header_names)):
             if header_names[col] == "Period":
                 continue
-            val = totals.get(col, 0.0)
-            summary[col] = (
-                format_diff_value(val),
-                diff_background(val),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            col_totals = totals.get(col, {})
+            budget_val = col_totals.get("budget", 0.0)
+            actual_val = col_totals.get("actual", 0.0)
+            diff_val = col_totals.get("diff", actual_val - budget_val)
+            actual_bg = (
+                SUMMARY_ACTUAL_POSITIVE_COLOR
+                if actual_val >= 0
+                else SUMMARY_ACTUAL_NEGATIVE_COLOR
             )
+            budget_bg = (
+                SUMMARY_BUDGET_POSITIVE_COLOR
+                if budget_val >= 0
+                else SUMMARY_BUDGET_NEGATIVE_COLOR
+            )
+            if diff_val >= 0:
+                diff_bg = SUMMARY_DIFF_POSITIVE_COLOR
+                diff_fg: QColor | None = None
+            else:
+                diff_bg = SUMMARY_DIFF_NEGATIVE_BG_COLOR
+                diff_fg = SUMMARY_DIFF_NEGATIVE_FG_COLOR
+            diff_line = {
+                "text": format_diff_value(diff_val),
+                "bg": diff_bg,
+            }
+            if diff_fg is not None:
+                diff_line["fg"] = diff_fg
+            summary[col] = {
+                "background": QBrush(QColor("#E8EAED")),
+                "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                "lines": [
+                    {"text": format_diff_value(actual_val), "bg": actual_bg},
+                    {"text": format_diff_value(budget_val), "bg": budget_bg},
+                    diff_line,
+                ],
+            }
         # Ensure TOTAL column gets included if it lies beyond header_names length due to model column
-        total_col_index = self.model.columnCount() - 1
         if total_col_index not in summary:
-            val = totals.get(total_col_index, 0.0)
-            summary[total_col_index] = (
-                format_diff_value(val),
-                diff_background(val),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            col_totals = totals.get(total_col_index, {})
+            budget_val = col_totals.get("budget", 0.0)
+            actual_val = col_totals.get("actual", 0.0)
+            diff_val = col_totals.get("diff", actual_val - budget_val)
+            actual_bg = (
+                SUMMARY_ACTUAL_POSITIVE_COLOR
+                if actual_val >= 0
+                else SUMMARY_ACTUAL_NEGATIVE_COLOR
             )
+            budget_bg = (
+                SUMMARY_BUDGET_POSITIVE_COLOR
+                if budget_val >= 0
+                else SUMMARY_BUDGET_NEGATIVE_COLOR
+            )
+            if diff_val >= 0:
+                diff_bg = SUMMARY_DIFF_POSITIVE_COLOR
+                diff_fg = None
+            else:
+                diff_bg = SUMMARY_DIFF_NEGATIVE_BG_COLOR
+                diff_fg = SUMMARY_DIFF_NEGATIVE_FG_COLOR
+            diff_line = {
+                "text": format_diff_value(diff_val),
+                "bg": diff_bg,
+            }
+            if diff_fg:
+                diff_line["fg"] = diff_fg
+            summary[total_col_index] = {
+                "background": QBrush(QColor("#E8EAED")),
+                "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                "lines": [
+                    {"text": format_diff_value(actual_val), "bg": actual_bg},
+                    {"text": format_diff_value(budget_val), "bg": budget_bg},
+                    diff_line,
+                ],
+            }
         self.summary_header.set_summary(summary)
 
     def apply_light_theme(self):

@@ -33,6 +33,13 @@ STYLE_DEFAULTS: dict[str, Any] = {
     "summary_font_size": 10,
     "window_scale_ratio": 0.9,
     "chart_height": 150,
+    "summary_actual_positive_color": "#CFE8FF",
+    "summary_actual_negative_color": "#E7C7A6",
+    "summary_budget_positive_color": "#CBF5C5",
+    "summary_budget_negative_color": "#F8C4C4",
+    "summary_diff_positive_color": "#F8F9FA",
+    "summary_diff_negative_bg_color": "#111111",
+    "summary_diff_negative_fg_color": "#FFFFFF",
 }
 
 _STYLE_INT_KEYS = {

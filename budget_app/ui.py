@@ -2,6 +2,8 @@
 from PyQt6.QtWidgets import QTreeView
 from pathlib import Path
 
+from typing import Any
+
 from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen
 from PyQt6.QtCore import Qt, QRect, QSize, QEvent
 
@@ -218,17 +220,17 @@ class DividerDelegate(QStyledItemDelegate):
 class SummaryHeaderView(QHeaderView):
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
-        self._summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] = {}
-        self._summary_height = 24
+        self._summary: dict[int, Any] = {}
+        self._summary_height = SUMMARY_FONT_SIZE * 3 + 8
         self._summary_font = QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE)
-        self._summary_font.setBold(True)
+        self._summary_font.setBold(False)
         self.setSectionsClickable(True)
         self._highlighted_sections: set[int] = set()
         self._highlight_pen = QPen(QColor('#673BFF'))
         self._highlight_pen.setWidth(2)
         self._highlight_pen.setCosmetic(True)
 
-    def set_summary(self, summary: dict[int, tuple[str, QBrush, Qt.AlignmentFlag]] | None):
+    def set_summary(self, summary: dict[int, Any] | None):
         self._summary = summary or {}
         self.updateGeometry()
         self.viewport().update()
@@ -265,30 +267,95 @@ class SummaryHeaderView(QHeaderView):
         option.text = str(header_text) if header_text is not None else option.text
         self.style().drawControl(QStyle.ControlElement.CE_HeaderSection, option, painter, self)
         base_size = self.sectionSizeFromContents(logicalIndex)
-        label_h = max(14, min(base_size.height(), rect.height()))
+        label_h = min(base_size.height(), rect.height(), SUMMARY_FONT_SIZE + 8)
         label_rect = QRect(rect.left(), rect.top(), rect.width(), label_h)
         label_opt = QStyleOptionHeader(option)
         label_opt.rect = label_rect
         self.style().drawControl(QStyle.ControlElement.CE_HeaderLabel, label_opt, painter, self)
 
-        summary = self._summary.get(logicalIndex)
-        if summary:
-            if len(summary) == 3:
-                text, brush, alignment = summary
-            else:
-                text, brush = summary
-                alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        summary_entry = self._summary.get(logicalIndex)
+        if summary_entry:
             summary_h = rect.height() - label_h
             if summary_h > 2:
                 summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
                 painter.save()
-                painter.fillRect(summary_rect, brush)
                 divider_pen = QPen(QColor('#02070F'), 2)
-                painter.setPen(divider_pen)
-                painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-                painter.setPen(QPen(QColor('#111')))
-                painter.setFont(self._summary_font)
-                painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
+
+                def _to_brush(value: Any) -> QBrush | None:
+                    if value is None:
+                        return None
+                    if isinstance(value, QBrush):
+                        return value
+                    if isinstance(value, QColor):
+                        return QBrush(value)
+                    if isinstance(value, str):
+                        color = QColor(value)
+                        if color.isValid():
+                            return QBrush(color)
+                    return None
+
+                def _to_color(value: Any, default: QColor) -> QColor:
+                    if isinstance(value, QColor):
+                        return value
+                    if isinstance(value, str):
+                        color = QColor(value)
+                        if color.isValid():
+                            return color
+                    return default
+
+                if isinstance(summary_entry, dict):
+                    alignment = int(
+                        summary_entry.get(
+                            "alignment",
+                            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                        )
+                    )
+                    overall_brush = _to_brush(summary_entry.get("background"))
+                    if overall_brush:
+                        painter.fillRect(summary_rect, overall_brush)
+                    else:
+                        painter.fillRect(summary_rect, QBrush(QColor("#E8EAED")))
+                    painter.setPen(divider_pen)
+                    painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+                    painter.setFont(self._summary_font)
+                    lines = summary_entry.get("lines") or []
+                    if lines:
+                        line_count = len(lines)
+                        available_height = summary_rect.height()
+                        base_height = max(1, available_height // line_count)
+                        remainder = available_height - base_height * line_count
+                        current_top = summary_rect.top()
+                        for idx, line in enumerate(lines):
+                            line_height = base_height + (1 if idx < remainder else 0)
+                            line_rect = QRect(summary_rect.left(), current_top, summary_rect.width(), line_height)
+                            line_brush = _to_brush(line.get("bg"))
+                            if line_brush:
+                                painter.fillRect(line_rect, line_brush)
+                            text = str(line.get("text", ""))
+                            fg_color = _to_color(line.get("fg"), QColor("#111"))
+                            painter.setPen(QPen(fg_color))
+                            painter.drawText(line_rect.adjusted(6, 0, -4, 0), alignment, text)
+                            current_top += line_height
+                    else:
+                        painter.setPen(QPen(QColor("#111")))
+                        painter.drawText(summary_rect.adjusted(6, 0, -4, 0), alignment, "")
+                else:
+                    if isinstance(summary_entry, tuple):
+                        if len(summary_entry) == 3:
+                            text, brush, alignment = summary_entry
+                        else:
+                            text, brush = summary_entry
+                            alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                    else:
+                        text = str(summary_entry)
+                        brush = QBrush(QColor("#E8EAED"))
+                        alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                    painter.fillRect(summary_rect, brush)
+                    painter.setPen(divider_pen)
+                    painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+                    painter.setPen(QPen(QColor("#111")))
+                    painter.setFont(self._summary_font)
+                    painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
                 painter.restore()
 
         if logicalIndex in self._highlighted_sections:
