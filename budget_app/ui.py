@@ -242,6 +242,15 @@ class SummaryHeaderView(QHeaderView):
         self._highlighted_sections = new_set
         self.viewport().update()
 
+    def visible_table_width(self) -> int:
+        """Return the visible width occupied by header sections within the viewport."""
+        if self.count() == 0:
+            return self.viewport().width()
+        last = self.count() - 1
+        section_right = self.sectionViewportPosition(last) + self.sectionSize(last)
+        section_right = max(0, section_right)
+        return int(min(self.viewport().width(), section_right))
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self.viewport())
@@ -250,7 +259,7 @@ class SummaryHeaderView(QHeaderView):
         pen.setCosmetic(True)
         painter.setPen(pen)
         y = self.viewport().height() - 1
-        painter.drawLine(0, y, self.viewport().width(), y)
+        painter.drawLine(0, y, self.visible_table_width(), y)
         painter.end()
 
     def sizeHint(self):
@@ -417,7 +426,12 @@ class BudgetTreeView(QTreeView):
         pen.setWidth(2)
         pen.setCosmetic(True)
         painter.setPen(pen)
-        painter.drawLine(0, 0, self.viewport().width(), 0)
+        header = self.header()
+        if header and hasattr(header, "visible_table_width"):
+            line_end = int(getattr(header, "visible_table_width")())
+        else:
+            line_end = self.viewport().width()
+        painter.drawLine(0, 0, line_end, 0)
         if not self._highlighted_columns:
             painter.end()
             return
