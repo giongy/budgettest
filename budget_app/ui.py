@@ -242,6 +242,17 @@ class SummaryHeaderView(QHeaderView):
         self._highlighted_sections = new_set
         self.viewport().update()
 
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self.viewport())
+        pen = QPen(QColor('#02070F'))
+        pen.setWidth(2)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        y = self.viewport().height() - 1
+        painter.drawLine(0, y, self.viewport().width(), y)
+        painter.end()
+
     def sizeHint(self):
         base = super().sizeHint()
         if not self._summary:
@@ -279,7 +290,9 @@ class SummaryHeaderView(QHeaderView):
             if summary_h > 2:
                 summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
                 painter.save()
-                divider_pen = QPen(QColor('#02070F'), 2)
+                divider_pen = QPen(QColor('#02070F'))
+                divider_pen.setWidth(1)
+                divider_pen.setCosmetic(True)
 
                 def _to_brush(value: Any) -> QBrush | None:
                     if value is None:
@@ -316,7 +329,6 @@ class SummaryHeaderView(QHeaderView):
                     else:
                         painter.fillRect(summary_rect, QBrush(QColor("#E8EAED")))
                     painter.setPen(divider_pen)
-                    painter.drawLine(rect.bottomLeft(), rect.bottomRight())
                     painter.setFont(self._summary_font)
                     lines = summary_entry.get("lines") or []
                     if lines:
@@ -352,7 +364,6 @@ class SummaryHeaderView(QHeaderView):
                         alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                     painter.fillRect(summary_rect, brush)
                     painter.setPen(divider_pen)
-                    painter.drawLine(rect.bottomLeft(), rect.bottomRight())
                     painter.setPen(QPen(QColor("#111")))
                     painter.setFont(self._summary_font)
                     painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
@@ -401,12 +412,19 @@ class BudgetTreeView(QTreeView):
 
     def paintEvent(self, event):
         super().paintEvent(event)
+        painter = QPainter(self.viewport())
+        pen = QPen(QColor('#02070F'))
+        pen.setWidth(2)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawLine(0, 0, self.viewport().width(), 0)
         if not self._highlighted_columns:
+            painter.end()
             return
         header = self.header()
         if header is None:
+            painter.end()
             return
-        painter = QPainter(self.viewport())
         painter.setPen(self._highlight_pen)
         height = self.viewport().height()
         width_limit = self.viewport().width()
