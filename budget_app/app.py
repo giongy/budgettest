@@ -423,6 +423,8 @@ class BudgetApp(QWidget):
         for col in range(1, len(header_names)):
             if header_names[col] == "Period":
                 continue
+            if col == 1:
+                continue
             col_totals = totals.get(col, {})
             budget_val = col_totals.get("budget", 0.0)
             actual_val = col_totals.get("actual", 0.0)
