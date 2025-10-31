@@ -1,0 +1,13 @@
+*** Begin Patch
+*** Update File: budget_app/ui.py
+@@
+-from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader
+-from PyQt6.QtWidgets import QTreeView
++from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader, QToolTip
++from PyQt6.QtWidgets import QTreeView
+@@
+-from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen
+-from PyQt6.QtCore import Qt, QRect, QSize, QEvent
++from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen, QHelpEvent
++from PyQt6.QtCore import Qt, QRect, QSize, QEvent
+*** End Patch

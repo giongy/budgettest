@@ -1,11 +1,11 @@
-﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader
+﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader, QToolTip
 from PyQt6.QtWidgets import QTreeView
 from pathlib import Path
 
 from typing import Any
 
-from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen
-from PyQt6.QtCore import Qt, QRect, QSize, QEvent
+from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen, QHelpEvent
+from PyQt6.QtCore import Qt, QRect, QSize, QEvent, QTimer, QPoint
 
 from .config import PERIOD_CHOICES
 from .style import UI_FONT_FAMILY, UI_BASE_FONT_SIZE, UI_BOLD_FONT_SIZE, SUMMARY_FONT_SIZE
@@ -122,6 +122,35 @@ class ButtonDelegate(QStyledItemDelegate):
             painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, "=")
         painter.restore()
 
+    def _button_rect(self, option: QStyleOptionViewItem, index, prepared_option: QStyleOptionViewItem | None = None) -> QRect:
+        if prepared_option is not None:
+            item_option = QStyleOptionViewItem(prepared_option)
+        else:
+            item_option = QStyleOptionViewItem(option)
+            self.initStyleOption(item_option, index)
+
+        rect = option.rect
+        width = self.button_size.width()
+        max_width = rect.width() - self.margin * 2
+        if max_width <= 0:
+            width = max(self.button_size.width(), rect.width())
+        else:
+            width = min(self.button_size.width(), max_width)
+        available_height = rect.height() - self.margin * 2
+        if available_height > 0:
+            height = min(self.button_size.height(), available_height)
+        else:
+            height = min(self.button_size.height(), rect.height())
+        height = max(height, 6)
+        y = rect.y() + max((rect.height() - height) // 2, 0)
+
+        x = rect.right() - width - self.margin
+        min_x = rect.left() + self.margin
+        if x < min_x:
+            x = min_x
+
+        return QRect(int(x), int(y), width, height)
+
     def editorEvent(self, event, model, option, index):
         meta = index.data(Qt.ItemDataRole.UserRole)
         if not meta or not isinstance(meta, tuple) or meta[0] != "budget":
@@ -165,6 +194,114 @@ class ButtonDelegate(QStyledItemDelegate):
                 self.callback(index)
                 return True
             return False
+
+        return super().editorEvent(event, model, option, index)
+
+
+class CategoryDetailDelegate(QStyledItemDelegate):
+    def __init__(self, parent, callback):
+        super().__init__(parent)
+        self.view = parent
+        self.view.setMouseTracking(True)
+        self.view.viewport().setMouseTracking(True)
+        self.callback = callback
+        self.button_size = QSize(18, 18)
+        self.margin = 3
+        self._pressed = None
+        icon_path = Path(__file__).resolve().parent.parent / "dettagli.png"
+        if icon_path.exists():
+            self.icon_pixmap = QPixmap(str(icon_path))
+        else:
+            style = self.view.style() if self.view else QApplication.style()
+            icon = style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+            self.icon_pixmap = icon.pixmap(self.button_size) if not icon.isNull() else QPixmap()
+
+    def _is_category_row(self, index):
+        if not index.isValid():
+            return False
+        meta = index.data(Qt.ItemDataRole.UserRole)
+        if not meta or not isinstance(meta, tuple) or meta[0] != "category_label":
+            return False
+        depth = meta[2] if len(meta) > 2 else 0
+        return (depth or 0) > 0
+
+    def paint(self, painter, option, index):
+        if not self._is_category_row(index):
+            super().paint(painter, option, index)
+            return
+        text_option = QStyleOptionViewItem(option)
+        self.initStyleOption(text_option, index)
+        reserve = self.button_size.width() + self.margin * 2
+        text_option.rect = text_option.rect.adjusted(0, 0, -reserve, 0)
+        style = self.view.style() if self.view else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, text_option, painter, self.view)
+
+        button_rect = self._button_rect(option, index, text_option)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if self._pressed == (index.row(), index.column()):
+            fill_color = QColor("#d0d0d0")
+        elif option.state & QStyle.StateFlag.State_MouseOver:
+            fill_color = QColor("#f0f0f0")
+        else:
+            fill_color = QColor("#f8f8f8")
+        painter.setPen(QPen(QColor("#777777")))
+        painter.setBrush(QBrush(fill_color))
+        painter.drawRoundedRect(button_rect, 4, 4)
+        if not self.icon_pixmap.isNull():
+            pixmap = self.icon_pixmap
+            if pixmap.size() != button_rect.size():
+                pixmap = pixmap.scaled(
+                    button_rect.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            icon_x = button_rect.x() + max((button_rect.width() - pixmap.width()) // 2, 0)
+            icon_y = button_rect.y() + max((button_rect.height() - pixmap.height()) // 2, 0)
+            painter.drawPixmap(icon_x, icon_y, pixmap)
+        else:
+            painter.drawText(button_rect, Qt.AlignmentFlag.AlignCenter, "i")
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index):
+        if not self._is_category_row(index):
+            return super().editorEvent(event, model, option, index)
+
+        button_rect = self._button_rect(option, index)
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        inside = button_rect.contains(pos)
+
+        if event.type() == QEvent.Type.MouseMove:
+            if inside:
+                self.view.viewport().setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            else:
+                self.view.viewport().unsetCursor()
+            return False
+
+        if event.type() == QEvent.Type.Leave:
+            self.view.viewport().unsetCursor()
+            return False
+
+        if event.type() == QEvent.Type.MouseButtonPress and hasattr(event, "button") and event.button() == Qt.MouseButton.LeftButton:
+            if inside:
+                self._pressed = (index.row(), index.column())
+                return True
+            self._pressed = None
+            return False
+
+        if event.type() == QEvent.Type.MouseButtonRelease and hasattr(event, "button") and event.button() == Qt.MouseButton.LeftButton:
+            pressed = self._pressed
+            self._pressed = None
+            self.view.viewport().unsetCursor()
+            if pressed == (index.row(), index.column()) and inside:
+                self.callback(index)
+                return True
+            return False
+
+        if event.type() == QEvent.Type.MouseButtonDblClick and hasattr(event, "button") and event.button() == Qt.MouseButton.LeftButton:
+            if inside:
+                self.callback(index)
+                return True
 
         return super().editorEvent(event, model, option, index)
 
@@ -229,11 +366,67 @@ class SummaryHeaderView(QHeaderView):
         self._highlight_pen = QPen(QColor('#673BFF'))
         self._highlight_pen.setWidth(2)
         self._highlight_pen.setCosmetic(True)
+        QToolTip.setFont(QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE + 2))
+        app = QApplication.instance()
+        if app is not None:
+            tooltip_style = "QToolTip { background-color: #000000; color: #FFFFFF; border: 2px solid #1ae01a; font-size: %dpt; }" % (SUMMARY_FONT_SIZE + 2)
+            existing = app.styleSheet() or ""
+            if tooltip_style not in existing:
+                if existing:
+                    app.setStyleSheet(existing + "\n" + tooltip_style)
+                else:
+                    app.setStyleSheet(tooltip_style)
+        self.setMouseTracking(True)
+        self._tooltip_timer = QTimer(self)
+        self._tooltip_timer.setSingleShot(True)
+        self._tooltip_timer.setInterval(300)
+        self._tooltip_timer.timeout.connect(self._show_pending_tooltip)
+        self._pending_tooltip_index: int | None = None
+        self._pending_tooltip_pos = QPoint()
+        self._tooltip_visible = False
 
     def set_summary(self, summary: dict[int, Any] | None):
         self._summary = summary or {}
+        model = self.model()
+        if model is not None:
+            column_count = model.columnCount()
+            for logical_index in range(column_count):
+                tooltip = self._tooltip_text_for_index(logical_index)
+                model.setHeaderData(
+                    logical_index,
+                    Qt.Orientation.Horizontal,
+                    tooltip,
+                    Qt.ItemDataRole.ToolTipRole,
+                )
         self.updateGeometry()
         self.viewport().update()
+
+    def _tooltip_text_for_index(self, logical_index: int) -> str | None:
+        entry = self._summary.get(logical_index)
+        if isinstance(entry, dict):
+            return entry.get('tooltip')
+        if isinstance(entry, tuple) and len(entry) == 3:
+            return str(entry[0])
+        if isinstance(entry, str):
+            return entry
+        return None
+
+    def _show_pending_tooltip(self):
+        if self._pending_tooltip_index is None:
+            return
+        cursor_local = self.mapFromGlobal(QCursor.pos())
+        if not self.rect().contains(cursor_local):
+            return
+        current_index = self.logicalIndexAt(cursor_local)
+        if current_index != self._pending_tooltip_index:
+            return
+        tooltip = self._tooltip_text_for_index(self._pending_tooltip_index)
+        if not tooltip:
+            return
+        self._pending_tooltip_pos = cursor_local
+        global_pos = self.mapToGlobal(self._pending_tooltip_pos)
+        QToolTip.showText(global_pos, tooltip, self)
+        self._tooltip_visible = True
 
     def set_highlighted_sections(self, sections: set[int] | list[int] | tuple[int, ...] | None):
         new_set = set(sections or [])
@@ -243,7 +436,6 @@ class SummaryHeaderView(QHeaderView):
         self.viewport().update()
 
     def visible_table_width(self) -> int:
-        """Return the visible width occupied by header sections within the viewport."""
         if self.count() == 0:
             return self.viewport().width()
         last = self.count() - 1
@@ -273,6 +465,41 @@ class SummaryHeaderView(QHeaderView):
         if not self._summary:
             return base
         return QSize(base.width(), base.height() + self._summary_height)
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+        logical_index = self.logicalIndexAt(pos)
+        tooltip = self._tooltip_text_for_index(logical_index)
+        if tooltip:
+            if self._tooltip_visible and logical_index == self._pending_tooltip_index:
+                self._pending_tooltip_pos = pos
+                QToolTip.showText(self.mapToGlobal(pos), tooltip, self)
+            else:
+                self._tooltip_visible = False
+                self._pending_tooltip_index = logical_index
+                self._pending_tooltip_pos = pos
+                self._tooltip_timer.stop()
+                self._tooltip_timer.start()
+        else:
+            self._tooltip_timer.stop()
+            self._pending_tooltip_index = None
+            if self._tooltip_visible:
+                QToolTip.hideText()
+                self._tooltip_visible = False
+
+    def leaveEvent(self, event):
+        self._tooltip_timer.stop()
+        self._pending_tooltip_index = None
+        if self._tooltip_visible:
+            QToolTip.hideText()
+            self._tooltip_visible = False
+        super().leaveEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.Type.ToolTip:
+            return True
+        return super().event(event)
 
     def paintSection(self, painter: QPainter, rect: QRect, logicalIndex: int):
         option = QStyleOptionHeader()
@@ -328,18 +555,18 @@ class SummaryHeaderView(QHeaderView):
                 if isinstance(summary_entry, dict):
                     alignment = int(
                         summary_entry.get(
-                            "alignment",
+                            'alignment',
                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                         )
                     )
-                    overall_brush = _to_brush(summary_entry.get("background"))
+                    overall_brush = _to_brush(summary_entry.get('background'))
                     if overall_brush:
                         painter.fillRect(summary_rect, overall_brush)
                     else:
-                        painter.fillRect(summary_rect, QBrush(QColor("#E8EAED")))
+                        painter.fillRect(summary_rect, QBrush(QColor('#E8EAED')))
                     painter.setPen(divider_pen)
                     painter.setFont(self._summary_font)
-                    lines = summary_entry.get("lines") or []
+                    lines = summary_entry.get('lines') or []
                     if lines:
                         line_count = len(lines)
                         available_height = summary_rect.height()
@@ -349,17 +576,17 @@ class SummaryHeaderView(QHeaderView):
                         for idx, line in enumerate(lines):
                             line_height = base_height + (1 if idx < remainder else 0)
                             line_rect = QRect(summary_rect.left(), current_top, summary_rect.width(), line_height)
-                            line_brush = _to_brush(line.get("bg"))
+                            line_brush = _to_brush(line.get('bg'))
                             if line_brush:
                                 painter.fillRect(line_rect, line_brush)
-                            text = str(line.get("text", ""))
-                            fg_color = _to_color(line.get("fg"), QColor("#111"))
+                            text = str(line.get('text', ''))
+                            fg_color = _to_color(line.get('fg'), QColor('#111'))
                             painter.setPen(QPen(fg_color))
                             painter.drawText(line_rect.adjusted(6, 0, -4, 0), alignment, text)
                             current_top += line_height
                     else:
-                        painter.setPen(QPen(QColor("#111")))
-                        painter.drawText(summary_rect.adjusted(6, 0, -4, 0), alignment, "")
+                        painter.setPen(QPen(QColor('#111')))
+                        painter.drawText(summary_rect.adjusted(6, 0, -4, 0), alignment, '')
                 else:
                     if isinstance(summary_entry, tuple):
                         if len(summary_entry) == 3:
@@ -369,11 +596,11 @@ class SummaryHeaderView(QHeaderView):
                             alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                     else:
                         text = str(summary_entry)
-                        brush = QBrush(QColor("#E8EAED"))
+                        brush = QBrush(QColor('#E8EAED'))
                         alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                     painter.fillRect(summary_rect, brush)
                     painter.setPen(divider_pen)
-                    painter.setPen(QPen(QColor("#111")))
+                    painter.setPen(QPen(QColor('#111')))
                     painter.setFont(self._summary_font)
                     painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
                 painter.restore()
@@ -384,8 +611,6 @@ class SummaryHeaderView(QHeaderView):
             painter.drawLine(rect.left(), rect.top(), rect.left(), rect.bottom())
             painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
             painter.restore()
-
-
 class BudgetTreeView(QTreeView):
     def __init__(self, parent=None):
         super().__init__(parent)

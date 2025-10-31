@@ -6,8 +6,9 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QHeaderView, QMessageBox, QFileDialog,
     QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
+    QDialog, QTableWidget, QTableWidgetItem, QAbstractScrollArea,
 )
-from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon
+from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon, QStandardItem
 from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -20,7 +21,15 @@ from .repository import (
     upsert_budget_entry,
     delete_budget_entry,
 )
-from .ui import make_item, PeriodDelegate, ButtonDelegate, DividerDelegate, SummaryHeaderView, BudgetTreeView
+from .ui import (
+    make_item,
+    PeriodDelegate,
+    ButtonDelegate,
+    DividerDelegate,
+    SummaryHeaderView,
+    BudgetTreeView,
+    CategoryDetailDelegate,
+)
 from .style import (
     CATEGORY_COLUMN_WIDTH,
     PERIOD_COLUMN_WIDTH,
@@ -43,6 +52,8 @@ from .style import (
     SUMMARY_DIFF_POSITIVE_COLOR,
     SUMMARY_DIFF_NEGATIVE_BG_COLOR,
     SUMMARY_DIFF_NEGATIVE_FG_COLOR,
+    DETAIL_FONT_FAMILY,
+    DETAIL_FONT_SIZE,
 )
 
 ITALIAN_MONTH_NAMES = {
@@ -154,6 +165,192 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
             last = missing_bids[-1]
             values[last] += diff
     return values, total_display, over_limit, set(overrides.keys())
+
+
+class CategoryDetailDialog(QDialog):
+    def __init__(self, parent, category_name: str, data_provider, copy_handler, value_handler):
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowTitle(f"Dettaglio categoria - {category_name}")
+        self.data_provider = data_provider
+        self.copy_handler = copy_handler
+        self.value_handler = value_handler
+        popup_font = QFont(DETAIL_FONT_FAMILY, DETAIL_FONT_SIZE)
+        self.setFont(popup_font)
+        self._item_font = QFont(popup_font)
+        # Previous default: QFont("Courier New", 14)
+        self.setMinimumSize(360, 300)
+        self.resize(620, 450)
+        self.setSizeGripEnabled(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        self.table = QTableWidget(0, 5, self)
+        self.table.setHorizontalHeaderLabels(["Periodo", "Actual", "Budget", "Diff", ""])
+        self.table.setFont(popup_font)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setMinimumSectionSize(0)
+        self.table.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        header = self.table.horizontalHeader()
+        header.setFont(popup_font)
+        for col in range(self.table.columnCount()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+        header.setMinimumSectionSize(40)
+        header.resizeSection(0, 150)
+        header.resizeSection(1, 120)
+        header.resizeSection(2, 110)
+        header.resizeSection(3, 120)
+        header.resizeSection(4, 45)
+        layout.addStretch()
+        layout.addWidget(self.table, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch()
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+        close_btn = QPushButton("Chiudi")
+        close_btn.clicked.connect(self.close)
+        buttons_layout.addWidget(close_btn)
+        layout.addLayout(buttons_layout)
+
+        icon_path = get_resource_path("pari.png")
+        if icon_path.exists():
+            self.copy_icon = QIcon(str(icon_path))
+        else:
+            self.copy_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
+
+        self._reloading = False
+        self.table.itemChanged.connect(self._on_item_changed)
+        self._reload()
+
+    def _reload(self):
+        self._reloading = True
+        rows = self.data_provider() or []
+        separator_rows: list[int] = []
+        self.table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            row_role = row.get("row_role", "month")
+
+            if row_role == "separator":
+                self.table.setSpan(row_idx, 0, 1, self.table.columnCount())
+                line_widget = QWidget(self.table)
+                line_widget.setMinimumHeight(2)
+                line_widget.setMaximumHeight(2)
+                line_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                line_widget.setStyleSheet("background-color: #000000; margin: 0px; padding: 0px;")
+                self.table.setCellWidget(row_idx, 0, line_widget)
+                self.table.verticalHeader().setSectionResizeMode(row_idx, QHeaderView.ResizeMode.Fixed)
+                self.table.setRowHeight(row_idx, 2)
+                separator_rows.append(row_idx)
+                continue
+
+            self.table.verticalHeader().setSectionResizeMode(row_idx, QHeaderView.ResizeMode.ResizeToContents)
+            label_item = QTableWidgetItem(row.get("label", ""))
+            label_item.setForeground(QBrush(QColor("#111")))
+            label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            label_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 0, label_item)
+
+            actual_item = QTableWidgetItem(row.get("actual_text", "0"))
+            actual_color = row.get("actual_color")
+            if actual_color:
+                actual_item.setForeground(QBrush(actual_color))
+            actual_item.setFlags(actual_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            actual_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 1, actual_item)
+
+            budget_item = QTableWidgetItem(row.get("budget_text", "0"))
+            budget_color = row.get("budget_color")
+            if budget_color:
+                budget_item.setForeground(QBrush(budget_color))
+            budget_index = row.get("budget_index")
+            if budget_index and budget_index.isValid():
+                budget_item.setFlags(budget_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            else:
+                budget_item.setFlags(budget_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            budget_item.setData(Qt.ItemDataRole.UserRole, budget_index)
+            budget_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 2, budget_item)
+
+            diff_item = QTableWidgetItem(row.get("diff_text", "0"))
+            diff_bg = row.get("diff_background")
+            if diff_bg:
+                diff_item.setBackground(diff_bg)
+            diff_item.setFlags(diff_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            diff_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 3, diff_item)
+
+            index = row.get("budget_index")
+            if index and index.isValid():
+                btn = QToolButton(self.table)
+                btn.setIcon(self.copy_icon)
+                btn.setAutoRaise(True)
+                btn.setToolTip("Imposta il budget uguale all'actual")
+                btn.setFont(self._item_font)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(lambda checked=False, idx=index: self._copy_and_refresh(idx))
+                self.table.setCellWidget(row_idx, 4, btn)
+            else:
+                dummy = QWidget(self.table)
+                self.table.setCellWidget(row_idx, 4, dummy)
+
+            if row_role == "total":
+                for col in range(0, 5):
+                    item = self.table.item(row_idx, col)
+                    if item is not None:
+                        font = item.font()
+                        font.setBold(True)
+                        item.setFont(font)
+
+        self.table.resizeRowsToContents()
+        width_targets = {0: 150, 1: 120, 2: 110, 3: 120, 4: 45}
+        for col, target in width_targets.items():
+            if col < self.table.columnCount():
+                self.table.setColumnWidth(col, target)
+        self.table.horizontalHeader().setStretchLastSection(False)
+
+        for idx in separator_rows:
+            self.table.verticalHeader().setSectionResizeMode(idx, QHeaderView.ResizeMode.Fixed)
+            self.table.setRowHeight(idx, 2)
+        total_width = self.table.verticalHeader().width() + self.table.frameWidth() * 2
+        if self.table.verticalScrollBar().isVisible():
+            total_width += self.table.verticalScrollBar().width()
+        for col in range(self.table.columnCount()):
+            total_width += self.table.columnWidth(col)
+        self.table.setMinimumWidth(total_width)
+        self.table.setMaximumWidth(total_width)
+
+        total_height = self.table.horizontalHeader().height() + self.table.frameWidth() * 2
+        if self.table.horizontalScrollBar().isVisible():
+            total_height += self.table.horizontalScrollBar().height()
+        for row in range(self.table.rowCount()):
+            total_height += self.table.rowHeight(row)
+        self.table.setMinimumHeight(total_height)
+        self.table.setMaximumHeight(total_height)
+        self._reloading = False
+
+    def _copy_and_refresh(self, model_index):
+        if self.copy_handler:
+            self.copy_handler(model_index)
+        self._reload()
+
+    def _on_item_changed(self, item: QTableWidgetItem):
+        if self._reloading:
+            return
+        if item.column() != 2:
+            return
+        model_index = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(model_index, QModelIndex) or not model_index.isValid():
+            return
+        if self.value_handler:
+            self.value_handler(model_index, item.text())
+        self._reload()
 
 
 class BudgetApp(QWidget):
@@ -274,9 +471,11 @@ class BudgetApp(QWidget):
         self.period_delegate = PeriodDelegate()
         self.budget_button_delegate = ButtonDelegate(self.view, self.apply_actual_to_budget)
         self.total_divider_delegate = DividerDelegate(self.view)
+        self.category_detail_delegate = CategoryDetailDelegate(self.view, self._on_category_detail_requested)
         self._collapsed_main: set[int] = set()
         self.view.doubleClicked.connect(self.on_view_double_clicked)
         self.current_headers: list[str] = []
+        self.category_label_items: dict[Any, QStandardItem] = {}
         self.apply_light_theme()
         self._db_label_fulltext = ""
         self._set_db_path_label(config.DB_PATH)
@@ -351,13 +550,14 @@ class BudgetApp(QWidget):
     ) -> dict[int, dict[str, float]]:
         totals: dict[int, dict[str, float]] = {}
 
-        def _accumulate(value_map: dict[str, float], key: str, text: str | None):
+        def _accumulate(value_map: dict[str, float], key: str, text: str | None) -> float:
             raw = (text or "").replace(" ", "").replace(",", "")
             try:
                 val = float(raw) if raw else 0.0
             except ValueError:
                 val = 0.0
             value_map[key] = value_map.get(key, 0.0) + val
+            return val
 
         root = self.model.invisibleRootItem()
         column_count = self.model.columnCount()
@@ -378,20 +578,26 @@ class BudgetApp(QWidget):
                     actual_row_idx = rr
             if budget_row_idx is None and actual_row_idx is None:
                 continue
+            category_name = (category_item.text() or "").strip()
             for col in range(1, column_count):
                 if col >= len(header_names):
                     continue
                 if header_names[col] == "Period":
                     continue
                 bucket = totals.setdefault(col, {})
+                actual_val = 0.0
+                budget_val = 0.0
                 if budget_row_idx is not None:
                     cell = category_item.child(budget_row_idx, col)
                     if cell:
-                        _accumulate(bucket, "budget", cell.text())
+                        budget_val = _accumulate(bucket, "budget", cell.text())
                 if actual_row_idx is not None:
                     cell = category_item.child(actual_row_idx, col)
                     if cell:
-                        _accumulate(bucket, "actual", cell.text())
+                        actual_val = _accumulate(bucket, "actual", cell.text())
+                diff_value = actual_val - budget_val
+                if abs(diff_value) > 1e-6:
+                    bucket.setdefault("contributors", []).append((category_name, diff_value))
         for data in totals.values():
             actual_total = data.get("actual", 0.0)
             budget_total = data.get("budget", 0.0)
@@ -445,13 +651,15 @@ class BudgetApp(QWidget):
             else:
                 diff_bg = SUMMARY_DIFF_NEGATIVE_BG_COLOR
                 diff_fg = SUMMARY_DIFF_NEGATIVE_FG_COLOR
+            contributors = col_totals.get("contributors", [])
+            tooltip = self._format_diff_tooltip(header_names[col], diff_val, contributors)
             diff_line = {
                 "text": format_diff_value(diff_val),
                 "bg": diff_bg,
             }
             if diff_fg is not None:
                 diff_line["fg"] = diff_fg
-            summary[col] = {
+            entry = {
                 "background": QBrush(QColor("#E8EAED")),
                 "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 "lines": [
@@ -460,6 +668,9 @@ class BudgetApp(QWidget):
                     diff_line,
                 ],
             }
+            if tooltip:
+                entry["tooltip"] = tooltip
+            summary[col] = entry
         # Ensure TOTAL column gets included if it lies beyond header_names length due to model column
         if total_col_index not in summary:
             col_totals = totals.get(total_col_index, {})
@@ -482,13 +693,15 @@ class BudgetApp(QWidget):
             else:
                 diff_bg = SUMMARY_DIFF_NEGATIVE_BG_COLOR
                 diff_fg = SUMMARY_DIFF_NEGATIVE_FG_COLOR
+            contributors = col_totals.get("contributors", [])
+            tooltip = self._format_diff_tooltip("TOTAL", diff_val, contributors)
             diff_line = {
                 "text": format_diff_value(diff_val),
                 "bg": diff_bg,
             }
             if diff_fg:
                 diff_line["fg"] = diff_fg
-            summary[total_col_index] = {
+            entry = {
                 "background": QBrush(QColor("#E8EAED")),
                 "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 "lines": [
@@ -497,7 +710,152 @@ class BudgetApp(QWidget):
                     diff_line,
                 ],
             }
+            if tooltip:
+                entry["tooltip"] = tooltip
+            summary[total_col_index] = entry
         self.summary_header.set_summary(summary)
+
+    def _format_diff_tooltip(
+        self,
+        label: str,
+        diff_value: float,
+        contributors: list[tuple[str, float]] | None,
+    ) -> str | None:
+        if abs(diff_value) <= 1e-6:
+            return None
+        if not contributors:
+            return None
+        lines: list[str] = []
+        sorted_contributors = sorted(contributors, key=lambda x: abs(x[1]), reverse=True)
+        count = 0
+        for name, value in sorted_contributors:
+            if abs(value) <= 1e-6:
+                continue
+            clean_name = name.strip() or "(senza nome)"
+            lines.append(f"{clean_name}: {format_diff_value(value)}")
+            count += 1
+            if count >= 12:
+                break
+        if not lines:
+            return None
+        tooltip = "Categorie con differenza:\n" + "\n".join(lines)
+        remaining = sum(1 for _, value in sorted_contributors[count:] if abs(value) > 1e-6)
+        if remaining > 0:
+            tooltip += f"\n... (+{remaining} altre)"
+        return tooltip
+
+    def _on_category_detail_requested(self, index: QModelIndex):
+        if not index.isValid():
+            return
+        meta = index.data(Qt.ItemDataRole.UserRole)
+        if not meta or not isinstance(meta, tuple) or meta[0] != "category_label":
+            return
+        cid = meta[1]
+        try:
+            cid_key = int(cid)
+        except Exception:
+            cid_key = cid
+        self._open_category_detail(cid_key)
+
+    def _open_category_detail(self, cid):
+        name = self.id2name.get(cid, f"(id:{cid})")
+        dialog = CategoryDetailDialog(
+            self,
+            name,
+            lambda cid=cid: self._category_detail_rows(cid),
+            self._copy_budget_from_detail,
+            self._update_budget_from_detail,
+        )
+        dialog.exec()
+
+    def _copy_budget_from_detail(self, model_index: QModelIndex):
+        if not model_index or not model_index.isValid():
+            return
+        self.apply_actual_to_budget(model_index)
+
+    def _update_budget_from_detail(self, model_index: QModelIndex, text: str):
+        if not model_index or not model_index.isValid():
+            return
+        self.model.setData(model_index, text, Qt.ItemDataRole.EditRole)
+
+    def _category_detail_rows(self, cid) -> list[dict[str, Any]]:
+        cat_item = self.category_label_items.get(cid)
+        if not cat_item:
+            return []
+        header_names = self.current_headers or []
+        if not header_names:
+            return []
+        actual_row_idx = budget_row_idx = diff_row_idx = None
+        for row in range(cat_item.rowCount()):
+            label_item = cat_item.child(row, 0)
+            if not label_item:
+                continue
+            label_text = label_item.text()
+            if label_text == "Actual":
+                actual_row_idx = row
+            elif label_text == "Budget":
+                budget_row_idx = row
+            elif label_text == "Diff":
+                diff_row_idx = row
+        if actual_row_idx is None or budget_row_idx is None or diff_row_idx is None:
+            return []
+
+        def parse_item(item) -> tuple[str, float, QColor | None, QBrush | None]:
+            if not item:
+                return "0", 0.0, None, None
+            text = (item.text() or "").strip()
+            display = text if text else "0"
+            raw = display.replace(" ", "").replace(",", "")
+            try:
+                value = float(raw) if raw else 0.0
+            except ValueError:
+                value = 0.0
+            fg_brush = item.foreground()
+            fg_color = fg_brush.color() if fg_brush and fg_brush.color().isValid() else None
+            bg_brush = item.background()
+            return display, value, fg_color, bg_brush
+
+        detail_rows: list[dict[str, Any]] = []
+        added_separator = False
+        column_count = min(self.model.columnCount(), len(header_names))
+        for col in range(1, column_count):
+            header_label = header_names[col]
+            if header_label == "Period" or col == 1:
+                continue
+            actual_item = cat_item.child(actual_row_idx, col)
+            budget_item = cat_item.child(budget_row_idx, col)
+            diff_item = cat_item.child(diff_row_idx, col)
+            is_total = header_label.upper() == "TOTAL"
+            if is_total and not added_separator and detail_rows:
+                detail_rows.append({"row_role": "separator"})
+                added_separator = True
+            actual_text, actual_value, actual_color, _ = parse_item(actual_item)
+            budget_text, budget_value, budget_color, _ = parse_item(budget_item)
+            diff_text, _, _, diff_bg = parse_item(diff_item)
+            computed_diff = actual_value - budget_value
+            if not diff_text or diff_text == "0":
+                diff_text = format_diff_value(computed_diff)
+            if not diff_bg:
+                diff_bg = diff_background(computed_diff)
+            meta = budget_item.data(Qt.ItemDataRole.UserRole) if budget_item else None
+            if meta and isinstance(meta, tuple) and meta[0] == "budget":
+                budget_index = budget_item.index()
+            else:
+                budget_index = QModelIndex()
+            detail_rows.append(
+                {
+                    "label": "Totale" if header_label.upper() == "TOTAL" else header_label,
+                    "actual_text": actual_text or "0",
+                    "actual_color": actual_color,
+                    "budget_text": budget_text or "0",
+                    "budget_color": budget_color,
+                    "diff_text": diff_text or "0",
+                    "diff_background": diff_bg,
+                    "budget_index": budget_index,
+                    "row_role": "total" if is_total else "month",
+                }
+            )
+        return detail_rows
 
     def apply_light_theme(self):
         self.setStyleSheet(
@@ -541,9 +899,11 @@ class BudgetApp(QWidget):
 
         self.model.clear()
         self.summary_header.set_summary({})
+        self.category_label_items = {}
         self.model.setHorizontalHeaderLabels(header_names)
         for col in range(self.model.columnCount()):
             self.view.setItemDelegateForColumn(col, self.default_delegate)
+        self.view.setItemDelegateForColumn(0, self.category_detail_delegate)
         self._apply_column_widths(header_names)
         for col in range(1, len(header_names)):
             if header_names[col] == "Period":
@@ -609,6 +969,11 @@ class BudgetApp(QWidget):
                 return
 
             self.model.appendRow([cat_item])
+            try:
+                cid_key = int(cid)
+            except Exception:
+                cid_key = cid
+            self.category_label_items[cid_key] = cat_item
 
             # Actual row
             act_row = [make_item("Actual", False)]

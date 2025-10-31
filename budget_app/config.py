@@ -40,6 +40,8 @@ STYLE_DEFAULTS: dict[str, Any] = {
     "summary_diff_positive_color": "#F8F9FA",
     "summary_diff_negative_bg_color": "#111111",
     "summary_diff_negative_fg_color": "#FFFFFF",
+    "detail_font_family": "Courier New",
+    "detail_font_size": 14,
 }
 
 _STYLE_INT_KEYS = {
@@ -52,6 +54,7 @@ _STYLE_INT_KEYS = {
     "diff_font_size",
     "summary_font_size",
     "chart_height",
+    "detail_font_size",
 }
 _STYLE_FLOAT_KEYS = {"window_scale_ratio"}
 

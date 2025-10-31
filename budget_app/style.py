@@ -16,8 +16,10 @@ DIFF_POSITIVE_COLOR = QColor(_STYLE["diff_positive_color"])
 DIFF_NEGATIVE_COLOR = QColor(_STYLE["diff_negative_color"])
 CALCULATED_BUDGET_COLOR = QColor(_STYLE["calculated_budget_color"])
 
-# Font settings
+
 UI_FONT_FAMILY = _STYLE["ui_font_family"]
+DETAIL_FONT_FAMILY = _STYLE["detail_font_family"]
+DETAIL_FONT_SIZE = _STYLE["detail_font_size"]
 UI_BASE_FONT_SIZE = _STYLE["ui_base_font_size"]
 UI_BOLD_FONT_SIZE = _STYLE["ui_bold_font_size"]
 DIFF_FONT_SIZE = _STYLE["diff_font_size"]
