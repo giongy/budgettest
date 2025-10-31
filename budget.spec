@@ -11,7 +11,11 @@ a = Analysis(
     binaries=[],
     datas=[
         ('money.png', '.'),
+        ('money2.png', '.'),
+        ('dettagli.png', '.'),
+        ('pari.png', '.'),
         ('money.ico', '.'),
+        ('pari.ico', '.'),
     ],
     hiddenimports=[],
     hookspath=[],
