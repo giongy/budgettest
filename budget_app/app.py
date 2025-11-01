@@ -169,24 +169,34 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
 
 
 class CategoryDetailDialog(QDialog):
-    def __init__(self, parent, category_name: str, data_provider, copy_handler, value_handler):
+    def __init__(self, parent, category_name: str, main_category_name: str, data_provider, copy_handler, value_handler):
         super().__init__(parent)
         self.setModal(True)
         self.setWindowTitle(f"Dettaglio categoria - {category_name}")
         self.data_provider = data_provider
         self.copy_handler = copy_handler
         self.value_handler = value_handler
+        self._category_name = category_name
+        self._main_category_name = main_category_name
         self._bulk_budget_indexes: list[QModelIndex] = []
         popup_font = QFont(DETAIL_FONT_FAMILY, DETAIL_FONT_SIZE)
         self.setFont(popup_font)
         self._item_font = QFont(popup_font)
         # Previous default: QFont("Courier New", 14)
         self.setMinimumSize(360, 300)
-        self.resize(620, 450)
+        self.resize(620, 700)
         self.setSizeGripEnabled(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
+        header_font = QFont(self._item_font)
+        header_font.setBold(True)
+        self.header_label = QLabel(self)
+        self.header_label.setFont(header_font)
+        self.header_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.header_label.setText(self._compose_header_text())
+        layout.addWidget(self.header_label)
+        layout.addSpacing(8)
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels(["Periodo", "Actual", "Budget", "Diff", ""])
         self.table.setFont(popup_font)
@@ -210,7 +220,7 @@ class CategoryDetailDialog(QDialog):
         header.resizeSection(2, 110)
         header.resizeSection(3, 120)
         header.resizeSection(4, 45)
-        layout.addStretch()
+        layout.addSpacing(6)
         layout.addWidget(self.table, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addSpacing(12)
 
@@ -236,6 +246,14 @@ class CategoryDetailDialog(QDialog):
         layout.addLayout(bulk_layout)
         layout.addSpacing(12)
 
+        self.chart_figure = Figure(figsize=(4.8, 2.4), dpi=100)
+        self.chart_canvas = FigureCanvasQTAgg(self.chart_figure)
+        self.chart_canvas.setMinimumHeight(200)
+        self.chart_canvas.setMaximumHeight(260)
+        self.chart_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.chart_canvas)
+        layout.addSpacing(12)
+
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
         close_btn = QPushButton("Chiudi")
@@ -252,6 +270,13 @@ class CategoryDetailDialog(QDialog):
         self._reloading = False
         self.table.itemChanged.connect(self._on_item_changed)
         self._reload()
+
+    def _compose_header_text(self) -> str:
+        main_name = (self._main_category_name or "").strip()
+        category_name = (self._category_name or "").strip()
+        if main_name and category_name and main_name != category_name:
+            return f"{main_name} / {category_name}"
+        return category_name or main_name or ""
 
     def _reload(self):
         self._reloading = True
@@ -335,6 +360,8 @@ class CategoryDetailDialog(QDialog):
                         font.setBold(True)
                         item.setFont(font)
 
+        self._update_chart(rows)
+
         self.table.resizeRowsToContents()
         width_targets = {0: 150, 1: 120, 2: 110, 3: 120, 4: 45}
         for col, target in width_targets.items():
@@ -378,6 +405,72 @@ class CategoryDetailDialog(QDialog):
         if self.value_handler:
             self.value_handler(model_index, item.text())
         self._reload()
+
+    def _update_chart(self, rows: list[dict[str, Any]]):
+        if not hasattr(self, "chart_figure"):
+            return
+        self.chart_figure.clear()
+        ax = self.chart_figure.add_subplot(111)
+        ax.set_facecolor("#ffffff")
+        labels: list[str] = []
+        values: list[float] = []
+
+        for row in rows or []:
+            if row.get("row_role") != "month":
+                continue
+            label = str(row.get("label", "")).strip()
+            val = row.get("actual_value")
+            if val is None:
+                try:
+                    text = str(row.get("actual_text", "0")).replace(" ", "").replace(",", "")
+                    val = float(text) if text else 0.0
+                except Exception:
+                    val = 0.0
+            try:
+                val_float = float(val)
+            except (TypeError, ValueError):
+                val_float = 0.0
+            labels.append(label or "")
+            values.append(val_float)
+
+        if not values:
+            self.chart_figure.subplots_adjust(left=0.1, right=0.9, top=0.85, bottom=0.25)
+            ax.axis("off")
+            ax.text(
+                0.5,
+                0.5,
+                "Nessun dato disponibile",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="#4b5563",
+            )
+            self.chart_canvas.draw_idle()
+            return
+
+        xs = list(range(len(values)))
+        ax.plot(
+            xs,
+            values,
+            color="#2c7a7b",
+            marker="o",
+            linewidth=2,
+            markersize=5,
+            label="Actual",
+        )
+        ax.set_xticks(xs)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#1f2937")
+        ax.tick_params(axis="y", labelsize=8, colors="#1f2937")
+        ax.set_title("Actual - andamento mensile", fontsize=10, color="#1f2937", pad=8)
+        ax.grid(axis="y", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.margins(x=0.05, y=0.2)
+        handles, labels_legend = ax.get_legend_handles_labels()
+        if labels_legend:
+            ax.legend(loc="upper right", fontsize=8, frameon=False)
+        self.chart_figure.subplots_adjust(left=0.12, right=0.97, top=0.9, bottom=0.32)
+        self.chart_canvas.draw_idle()
 
     def _parse_bulk_input(self) -> float | None:
         text = (self.bulk_input.text() or "").strip()
@@ -871,9 +964,25 @@ class BudgetApp(QWidget):
 
     def _open_category_detail(self, cid):
         name = self.id2name.get(cid, f"(id:{cid})")
+        main_name = ""
+        cat_item = self.category_label_items.get(cid)
+        if cat_item:
+            meta = cat_item.data(Qt.ItemDataRole.UserRole)
+            if meta and isinstance(meta, tuple):
+                if len(meta) >= 5 and meta[4]:
+                    main_name = str(meta[4])
+                elif len(meta) >= 4:
+                    try:
+                        main_id = int(meta[3])
+                    except Exception:
+                        main_id = meta[3]
+                    main_name = self.id2name.get(main_id, str(main_id))
+        if not main_name:
+            main_name = name
         dialog = CategoryDetailDialog(
             self,
             name,
+            main_name,
             lambda cid=cid: self._category_detail_rows(cid),
             self._copy_budget_from_detail,
             self._update_budget_from_detail,
@@ -959,6 +1068,7 @@ class BudgetApp(QWidget):
                     "label": "Totale" if header_label.upper() == "TOTAL" else header_label,
                     "actual_text": actual_text or "0",
                     "actual_color": actual_color,
+                    "actual_value": actual_value,
                     "budget_text": budget_text or "0",
                     "budget_color": budget_color,
                     "diff_text": diff_text or "0",
@@ -1061,12 +1171,21 @@ class BudgetApp(QWidget):
 
         QTimer.singleShot(0, lambda hn=list(header_names): self._apply_column_widths(hn))
 
-        def add_category(cid, depth=0):
-            cname = ("    " * depth) + self.id2name.get(cid, f"(id:{cid})")
-            cat_item = make_item(
-                cname, False, bold=True, color=QColor("#000"), meta=("category_label", cid, depth)
-            )
+        def add_category(cid, depth=0, root_cid=None, root_name=None):
+            current_name = self.id2name.get(cid, f"(id:{cid})")
+            if root_cid is None:
+                root_cid = cid
+            if root_name is None:
+                root_name = current_name
+            cname = ("    " * depth) + current_name
+            meta = ("category_label", cid, depth, root_cid, root_name)
+            cat_item = make_item(cname, False, bold=True, color=QColor("#000"), meta=meta)
 
+            try:
+                cid_key = int(cid)
+            except Exception:
+                cid_key = cid
+            self.category_label_items[cid_key] = cat_item
             if depth == 0:
                 row_items = [cat_item]
                 cat_item.setBackground(QBrush(MAIN_CATEGORY_BG))
@@ -1077,15 +1196,10 @@ class BudgetApp(QWidget):
                     row_items.append(filler)
                 self.model.appendRow(row_items)
                 for ch in sorted(self.children_map.get(cid, []), key=lambda x: self.id2name.get(x, "")):
-                    add_category(ch, depth + 1)
+                    add_category(ch, depth + 1, root_cid, root_name)
                 return
 
             self.model.appendRow([cat_item])
-            try:
-                cid_key = int(cid)
-            except Exception:
-                cid_key = cid
-            self.category_label_items[cid_key] = cat_item
 
             # Actual row
             act_row = [make_item("Actual", False)]
@@ -1181,7 +1295,7 @@ class BudgetApp(QWidget):
             cat_item.appendRow(diff_row)
 
             for ch in sorted(self.children_map.get(cid, []), key=lambda x: self.id2name.get(x, "")):
-                add_category(ch, depth + 1)
+                add_category(ch, depth + 1, root_cid, root_name)
 
             if not self.children_map.get(cid):
                 self.category_totals[cid] = {
