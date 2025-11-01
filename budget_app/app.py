@@ -4,7 +4,7 @@ from typing import Any
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QHeaderView, QMessageBox, QFileDialog,
+    QLineEdit, QPushButton, QHeaderView, QMessageBox, QFileDialog,
     QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
     QDialog, QTableWidget, QTableWidgetItem, QAbstractScrollArea,
 )
@@ -175,6 +175,7 @@ class CategoryDetailDialog(QDialog):
         self.data_provider = data_provider
         self.copy_handler = copy_handler
         self.value_handler = value_handler
+        self._bulk_budget_indexes: list[QModelIndex] = []
         popup_font = QFont(DETAIL_FONT_FAMILY, DETAIL_FONT_SIZE)
         self.setFont(popup_font)
         self._item_font = QFont(popup_font)
@@ -210,7 +211,29 @@ class CategoryDetailDialog(QDialog):
         header.resizeSection(4, 45)
         layout.addStretch()
         layout.addWidget(self.table, alignment=Qt.AlignmentFlag.AlignHCenter)
-        layout.addStretch()
+        layout.addSpacing(12)
+
+        bulk_layout = QHBoxLayout()
+        bulk_layout.setSpacing(8)
+        bulk_label = QLabel("Valore budget:")
+        bulk_label.setFont(self._item_font)
+        bulk_layout.addStretch()
+        bulk_layout.addWidget(bulk_label)
+        self.bulk_input = QLineEdit()
+        self.bulk_input.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.bulk_input.setPlaceholderText("0,00")
+        self.bulk_input.setClearButtonEnabled(True)
+        self.bulk_input.setFixedWidth(120)
+        bulk_layout.addWidget(self.bulk_input)
+        self.monthly_btn = QPushButton("Mensile")
+        self.monthly_btn.clicked.connect(self._apply_monthly_value)
+        bulk_layout.addWidget(self.monthly_btn)
+        self.annual_btn = QPushButton("Annuale")
+        self.annual_btn.clicked.connect(self._apply_annual_value)
+        bulk_layout.addWidget(self.annual_btn)
+        bulk_layout.addStretch()
+        layout.addLayout(bulk_layout)
+        layout.addSpacing(12)
 
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
@@ -234,6 +257,7 @@ class CategoryDetailDialog(QDialog):
         rows = self.data_provider() or []
         separator_rows: list[int] = []
         self.table.setRowCount(len(rows))
+        self._bulk_budget_indexes = []
         for row_idx, row in enumerate(rows):
             row_role = row.get("row_role", "month")
 
@@ -296,6 +320,8 @@ class CategoryDetailDialog(QDialog):
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(lambda checked=False, idx=index: self._copy_and_refresh(idx))
                 self.table.setCellWidget(row_idx, 4, btn)
+                if row_role == "month":
+                    self._bulk_budget_indexes.append(index)
             else:
                 dummy = QWidget(self.table)
                 self.table.setCellWidget(row_idx, 4, dummy)
@@ -351,6 +377,70 @@ class CategoryDetailDialog(QDialog):
         if self.value_handler:
             self.value_handler(model_index, item.text())
         self._reload()
+
+    def _parse_bulk_input(self) -> float | None:
+        text = (self.bulk_input.text() or "").strip()
+        if not text:
+            return None
+        cleaned = (
+            text.replace("€", "")
+            .replace("\u202f", "")
+            .replace("\u00a0", "")
+            .replace(" ", "")
+        )
+        if not cleaned:
+            return None
+        if "," in cleaned and "." in cleaned:
+            if cleaned.rfind(",") > cleaned.rfind("."):
+                cleaned = cleaned.replace(".", "")
+                cleaned = cleaned.replace(",", ".")
+            else:
+                cleaned = cleaned.replace(",", "")
+        elif "," in cleaned:
+            cleaned = cleaned.replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
+    def _show_bulk_input_error(self):
+        QMessageBox.warning(self, "Valore non valido", "Inserisci un importo numerico valido.")
+
+    def _apply_monthly_value(self):
+        amount = self._parse_bulk_input()
+        if amount is None:
+            self._show_bulk_input_error()
+            return
+        if not self._bulk_budget_indexes:
+            QMessageBox.information(self, "Nessun mese disponibile", "Non ci sono mesi modificabili per questa categoria.")
+            return
+        self._apply_values_to_indexes([amount] * len(self._bulk_budget_indexes))
+
+    def _apply_annual_value(self):
+        amount = self._parse_bulk_input()
+        if amount is None:
+            self._show_bulk_input_error()
+            return
+        if not self._bulk_budget_indexes:
+            QMessageBox.information(self, "Nessun mese disponibile", "Non ci sono mesi modificabili per questa categoria.")
+            return
+        monthly_value = amount / 12.0
+        values = [monthly_value] * len(self._bulk_budget_indexes)
+        rounded_values = [round(v, 2) for v in values]
+        diff = round(amount - sum(rounded_values), 2)
+        if rounded_values and abs(diff) > 1e-6:
+            rounded_values[-1] += diff
+        self._apply_values_to_indexes(rounded_values)
+
+    def _apply_values_to_indexes(self, values: list[float]):
+        if not self.value_handler:
+            return
+        for idx, val in zip(self._bulk_budget_indexes, values):
+            if isinstance(idx, QModelIndex) and idx.isValid():
+                self.value_handler(idx, f"{val:,.2f}")
+        self._reload()
+        self.bulk_input.setFocus()
+        self.bulk_input.selectAll()
 
 
 class BudgetApp(QWidget):
