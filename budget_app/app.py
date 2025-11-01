@@ -1260,13 +1260,14 @@ class BudgetApp(QWidget):
             bars = ax.barh(
                 y_pos,
                 values,
-                height=0.55,
+                height=0.90,
                 color=colors,
-                edgecolor="#d2d8e5",
+                edgecolor="#0e0f0f",
                 linewidth=0.6,
             )
             ax.set_yticks(list(y_pos))
             ax.set_yticklabels(labels, fontsize=9, color="#1f2933")
+            ax.invert_yaxis()
             ax.tick_params(axis="y", length=0)
             ax.tick_params(axis="x", colors="#6b7280", labelsize=8, pad=2)
             ax.set_title(title, fontsize=10, fontweight="bold", color="#1f2937", pad=6)
@@ -1350,7 +1351,7 @@ class BudgetApp(QWidget):
             ax.text(
                 ax.get_xlim()[1],
                 -0.7,
-                "Valore (EUR)",
+                "(EUR)",
                 fontsize=7,
                 color="#4b5563",
                 ha="right",
