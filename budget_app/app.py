@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from typing import Any
+from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
@@ -630,6 +631,27 @@ class BudgetApp(QWidget):
             header.resizeSection(col, width)
             self.view.setColumnWidth(col, width)
 
+    def _highlight_current_month_column(self):
+        if not self.current_headers:
+            return
+        year_text = self.year_cb.currentText() if hasattr(self, "year_cb") else ""
+        if not year_text or len(year_text) != 4 or not year_text.isdigit():
+            return
+        now = datetime.now()
+        month_code = f"{year_text}-{now.month:02d}"
+        candidates = {month_code, self._display_header_name(month_code)}
+        target_idx = None
+        for idx, name in enumerate(self.current_headers):
+            if name in candidates:
+                target_idx = idx
+                break
+        if target_idx is None:
+            return
+        if target_idx < 3 or target_idx >= len(self.current_headers) - 1:
+            return
+        self.view.set_highlighted_columns({target_idx})
+        self.summary_header.set_highlighted_sections({target_idx})
+
     def _on_year_changed(self, year: str):
         if year:
             config.save_last_budget_year(year)
@@ -1180,6 +1202,7 @@ class BudgetApp(QWidget):
             pass
         self.model.itemChanged.connect(self.on_item_changed)
         self.update_summary_chart()
+        self._highlight_current_month_column()
 
     def update_summary_chart(self):
         totals = {
