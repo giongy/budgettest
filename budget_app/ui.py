@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import QTreeView
 from pathlib import Path
 
-from typing import Any
+from typing import Any, Callable
 
 from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen, QHelpEvent
 from PyQt6.QtCore import Qt, QRect, QSize, QEvent, QTimer, QPoint
@@ -358,7 +358,7 @@ class SummaryHeaderView(QHeaderView):
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._summary: dict[int, Any] = {}
-        self._summary_height = SUMMARY_FONT_SIZE * 3 + 8
+        self._summary_height = 0
         self._summary_font = QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE)
         self._summary_font.setBold(False)
         self.setSectionsClickable(True)
@@ -366,10 +366,15 @@ class SummaryHeaderView(QHeaderView):
         self._highlight_pen = QPen(QColor('#673BFF'))
         self._highlight_pen.setWidth(2)
         self._highlight_pen.setCosmetic(True)
+        self._toggle_column: int | None = None
+        self._toggle_handler: Callable[[], None] | None = None
+        self._toggle_state = False
+        self._toggle_rect = QRect()
+        self._summary_line_height = SUMMARY_FONT_SIZE + 1
         QToolTip.setFont(QFont(UI_FONT_FAMILY, SUMMARY_FONT_SIZE + 2))
         app = QApplication.instance()
         if app is not None:
-            tooltip_style = "QToolTip { background-color: #000000; color: #FFFFFF; border: 2px solid #1ae01a; font-size: %dpt; }" % (SUMMARY_FONT_SIZE + 2)
+            tooltip_style = "QToolTip { background-color: #000000; color: #FFFFFF; border: 2px solid #925ee6; font-size: %dpt; }" % (SUMMARY_FONT_SIZE + 2)
             existing = app.styleSheet() or ""
             if tooltip_style not in existing:
                 if existing:
@@ -387,6 +392,7 @@ class SummaryHeaderView(QHeaderView):
 
     def set_summary(self, summary: dict[int, Any] | None):
         self._summary = summary or {}
+        self._recalculate_summary_height()
         model = self.model()
         if model is not None:
             column_count = model.columnCount()
@@ -400,6 +406,35 @@ class SummaryHeaderView(QHeaderView):
                 )
         self.updateGeometry()
         self.viewport().update()
+
+    def configure_toggle(
+        self,
+        column: int | None,
+        state: bool,
+        handler: Callable[[], None] | None = None,
+    ):
+        self._toggle_column = column
+        self._toggle_state = state
+        if handler is not None:
+            self._toggle_handler = handler
+        self._toggle_rect = QRect()
+        self.updateGeometry()
+        self.viewport().update()
+
+    def _recalculate_summary_height(self):
+        max_lines = 0
+        for entry in self._summary.values():
+            if isinstance(entry, dict):
+                lines = entry.get('lines')
+                if lines:
+                    max_lines = max(max_lines, len(lines))
+            elif entry is not None:
+                max_lines = max(max_lines, 1)
+        if max_lines <= 0:
+            self._summary_height = 0
+        else:
+            padding = 8
+            self._summary_height = max_lines * self._summary_line_height + padding
 
     def _tooltip_text_for_index(self, logical_index: int) -> str | None:
         entry = self._summary.get(logical_index)
@@ -488,12 +523,30 @@ class SummaryHeaderView(QHeaderView):
                 QToolTip.hideText()
                 self._tooltip_visible = False
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+            logical_index = self.logicalIndexAt(pos)
+            if (
+                self._toggle_column is not None
+                and logical_index == self._toggle_column
+                and not self._toggle_rect.isNull()
+                and self._toggle_rect.contains(pos)
+            ):
+                if self._toggle_handler:
+                    self._toggle_handler()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
     def leaveEvent(self, event):
         self._tooltip_timer.stop()
         self._pending_tooltip_index = None
         if self._tooltip_visible:
             QToolTip.hideText()
             self._tooltip_visible = False
+        if self._toggle_rect and not self._toggle_rect.isNull():
+            self._toggle_rect = QRect()
         super().leaveEvent(event)
 
     def event(self, event):
@@ -521,10 +574,16 @@ class SummaryHeaderView(QHeaderView):
         self.style().drawControl(QStyle.ControlElement.CE_HeaderLabel, label_opt, painter, self)
 
         summary_entry = self._summary.get(logicalIndex)
+        is_toggle_section = self._toggle_column is not None and logicalIndex == self._toggle_column
+        summary_rect = None
+        if is_toggle_section:
+            self._toggle_rect = QRect()
         if summary_entry:
             summary_h = rect.height() - label_h
             if summary_h > 2:
                 summary_rect = QRect(rect.left(), rect.bottom() - summary_h + 1, rect.width(), summary_h - 1)
+                if is_toggle_section:
+                    self._toggle_rect = QRect(summary_rect)
                 painter.save()
                 divider_pen = QPen(QColor('#02070F'))
                 divider_pen.setWidth(1)
@@ -581,9 +640,21 @@ class SummaryHeaderView(QHeaderView):
                                 painter.fillRect(line_rect, line_brush)
                             text = str(line.get('text', ''))
                             fg_color = _to_color(line.get('fg'), QColor('#111'))
+                            line_font_size = line.get('font_size')
+                            custom_font = None
+                            if line_font_size is not None:
+                                try:
+                                    parsed_size = int(line_font_size)
+                                except (TypeError, ValueError):
+                                    parsed_size = 0
+                                if parsed_size > 0:
+                                    custom_font = QFont(self._summary_font)
+                                    custom_font.setPointSize(parsed_size)
+                            painter.setFont(custom_font or self._summary_font)
                             painter.setPen(QPen(fg_color))
                             painter.drawText(line_rect.adjusted(6, 0, -4, 0), alignment, text)
                             current_top += line_height
+                        painter.setFont(self._summary_font)
                     else:
                         painter.setPen(QPen(QColor('#111')))
                         painter.drawText(summary_rect.adjusted(6, 0, -4, 0), alignment, '')
@@ -603,7 +674,18 @@ class SummaryHeaderView(QHeaderView):
                     painter.setPen(QPen(QColor('#111')))
                     painter.setFont(self._summary_font)
                     painter.drawText(summary_rect.adjusted(6, 0, -4, 0), int(alignment), text)
-                painter.restore()
+            painter.restore()
+        elif is_toggle_section:
+            self._toggle_rect = QRect()
+
+        if is_toggle_section and summary_rect is not None and self._toggle_state:
+            painter.save()
+            outline_pen = QPen(QColor('#4A6CF0'))
+            outline_pen.setWidth(2)
+            outline_pen.setCosmetic(True)
+            painter.setPen(outline_pen)
+            painter.drawRoundedRect(summary_rect.adjusted(2, 1, -2, -1), 4, 4)
+            painter.restore()
 
         if logicalIndex in self._highlighted_sections:
             painter.save()

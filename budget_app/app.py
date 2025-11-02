@@ -53,6 +53,7 @@ from .style import (
     SUMMARY_DIFF_POSITIVE_COLOR,
     SUMMARY_DIFF_NEGATIVE_BG_COLOR,
     SUMMARY_DIFF_NEGATIVE_FG_COLOR,
+    SUMMARY_FONT_SIZE,
     DETAIL_FONT_FAMILY,
     DETAIL_FONT_SIZE,
 )
@@ -637,6 +638,8 @@ class BudgetApp(QWidget):
         self.view = BudgetTreeView()
         self.summary_header = SummaryHeaderView(self.view)
         self.view.setHeader(self.summary_header)
+        self.summary_cumulative_mode = False
+        self.summary_header.configure_toggle(None, self.summary_cumulative_mode, self._on_summary_toggle_requested)
         self.summary_header.sectionDoubleClicked.connect(self._on_header_section_double_clicked)
         self.model = QStandardItemModel()
         self.view.setModel(self.model)
@@ -809,19 +812,28 @@ class BudgetApp(QWidget):
             data["diff"] = actual_total - budget_total
         return totals
 
+    def _on_summary_toggle_requested(self):
+        self.summary_cumulative_mode = not self.summary_cumulative_mode
+        self._update_summary_header()
+
     def _update_summary_header(self, header_names: list[str] | None = None):
         if header_names is None:
             header_names = self.current_headers
+        toggle_column: int | None = None
+        if header_names:
+            try:
+                toggle_column = header_names.index("Period")
+            except ValueError:
+                if len(header_names) > 2:
+                    toggle_column = 2
         if not header_names:
+            self.summary_header.configure_toggle(None, self.summary_cumulative_mode, self._on_summary_toggle_requested)
             self.summary_header.set_summary({})
             return
         totals = self._compute_summary_totals(header_names)
         summary: dict[int, Any] = {}
-        total_col_index = self.model.columnCount() - 1
-        overall_totals = totals.get(total_col_index, {})
-        overall_budget = overall_totals.get("budget", 0.0)
-        overall_actual = overall_totals.get("actual", 0.0)
-        overall_diff = overall_totals.get("diff", overall_actual - overall_budget)
+        model_column_count = self.model.columnCount()
+        total_col_index = model_column_count - 1 if model_column_count > 0 else len(header_names) - 1
         summary[0] = {
             "background": QBrush(QColor("#E8EAED")),
             "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -831,35 +843,97 @@ class BudgetApp(QWidget):
                 {"text": "DIFF", "bg": SUMMARY_DIFF_POSITIVE_COLOR},
             ],
         }
-        for col in range(1, len(header_names)):
-            if header_names[col] == "Period":
-                continue
-            if col == 1:
-                continue
+
+        ordered_columns = [
+            col
+            for col in range(1, len(header_names))
+            if header_names[col] != "Period" and col != 1
+        ]
+        actual_by_col: dict[int, float] = {}
+        budget_by_col: dict[int, float] = {}
+        diff_by_col: dict[int, float] = {}
+        contributors_by_col: dict[int, list[tuple[str, float]]] = {}
+        for col in ordered_columns:
             col_totals = totals.get(col, {})
             budget_val = col_totals.get("budget", 0.0)
             actual_val = col_totals.get("actual", 0.0)
             diff_val = col_totals.get("diff", actual_val - budget_val)
+            actual_by_col[col] = actual_val
+            budget_by_col[col] = budget_val
+            diff_by_col[col] = diff_val
+            contributors_by_col[col] = list(col_totals.get("contributors", []))
+
+        month_columns = [
+            col for col in ordered_columns if header_names[col].upper() != "TOTAL"
+        ]
+        cumulative_actual_by_col: dict[int, float] = {}
+        cumulative_budget_by_col: dict[int, float] = {}
+        cumulative_diff_by_col: dict[int, float] = {}
+        cumulative_contributors_by_col: dict[int, list[tuple[str, float]]] = {}
+        running_actual = running_budget = running_diff = 0.0
+        running_contributors: dict[str, float] = {}
+        for col in month_columns:
+            actual_val = actual_by_col.get(col, 0.0)
+            budget_val = budget_by_col.get(col, 0.0)
+            diff_val = diff_by_col.get(col, actual_val - budget_val)
+            running_actual += actual_val
+            running_budget += budget_val
+            running_diff += diff_val
+            cumulative_actual_by_col[col] = running_actual
+            cumulative_budget_by_col[col] = running_budget
+            cumulative_diff_by_col[col] = running_diff
+            for name, value in contributors_by_col.get(col, []):
+                running_contributors[name] = running_contributors.get(name, 0.0) + value
+            cumulative_contributors_by_col[col] = [
+                (name, value)
+                for name, value in running_contributors.items()
+                if abs(value) > 1e-6
+            ]
+        if total_col_index in ordered_columns:
+            if month_columns:
+                cumulative_actual_by_col[total_col_index] = running_actual
+                cumulative_budget_by_col[total_col_index] = running_budget
+                cumulative_diff_by_col[total_col_index] = running_diff
+                cumulative_contributors_by_col[total_col_index] = [
+                    (name, value)
+                    for name, value in running_contributors.items()
+                    if abs(value) > 1e-6
+                ]
+            else:
+                cumulative_actual_by_col[total_col_index] = actual_by_col.get(total_col_index, 0.0)
+                cumulative_budget_by_col[total_col_index] = budget_by_col.get(total_col_index, 0.0)
+                cumulative_diff_by_col[total_col_index] = diff_by_col.get(total_col_index, 0.0)
+                cumulative_contributors_by_col[total_col_index] = [
+                    (name, value)
+                    for name, value in contributors_by_col.get(total_col_index, [])
+                    if abs(value) > 1e-6
+                ]
+
+        def build_summary_entry(
+            label: str,
+            actual_value: float,
+            budget_value: float,
+            diff_value: float,
+            contributors: list[tuple[str, float]] | None,
+        ) -> dict[str, Any]:
             actual_bg = (
                 SUMMARY_ACTUAL_POSITIVE_COLOR
-                if actual_val >= 0
+                if actual_value >= 0
                 else SUMMARY_ACTUAL_NEGATIVE_COLOR
             )
             budget_bg = (
                 SUMMARY_BUDGET_POSITIVE_COLOR
-                if budget_val >= 0
+                if budget_value >= 0
                 else SUMMARY_BUDGET_NEGATIVE_COLOR
             )
-            if diff_val >= 0:
+            if diff_value >= 0:
                 diff_bg = SUMMARY_DIFF_POSITIVE_COLOR
                 diff_fg: QColor | None = None
             else:
                 diff_bg = SUMMARY_DIFF_NEGATIVE_BG_COLOR
                 diff_fg = SUMMARY_DIFF_NEGATIVE_FG_COLOR
-            contributors = col_totals.get("contributors", [])
-            tooltip = self._format_diff_tooltip(header_names[col], diff_val, contributors)
             diff_line = {
-                "text": format_diff_value(diff_val),
+                "text": format_diff_value(diff_value),
                 "bg": diff_bg,
             }
             if diff_fg is not None:
@@ -868,56 +942,90 @@ class BudgetApp(QWidget):
                 "background": QBrush(QColor("#E8EAED")),
                 "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 "lines": [
-                    {"text": format_diff_value(actual_val), "bg": actual_bg},
-                    {"text": format_diff_value(budget_val), "bg": budget_bg},
+                    {"text": format_diff_value(actual_value), "bg": actual_bg},
+                    {"text": format_diff_value(budget_value), "bg": budget_bg},
                     diff_line,
                 ],
             }
+            tooltip = self._format_diff_tooltip(label, diff_value, contributors)
             if tooltip:
                 entry["tooltip"] = tooltip
-            summary[col] = entry
-        # Ensure TOTAL column gets included if it lies beyond header_names length due to model column
-        if total_col_index not in summary:
-            col_totals = totals.get(total_col_index, {})
-            budget_val = col_totals.get("budget", 0.0)
-            actual_val = col_totals.get("actual", 0.0)
-            diff_val = col_totals.get("diff", actual_val - budget_val)
-            actual_bg = (
-                SUMMARY_ACTUAL_POSITIVE_COLOR
-                if actual_val >= 0
-                else SUMMARY_ACTUAL_NEGATIVE_COLOR
-            )
-            budget_bg = (
-                SUMMARY_BUDGET_POSITIVE_COLOR
-                if budget_val >= 0
-                else SUMMARY_BUDGET_NEGATIVE_COLOR
-            )
-            if diff_val >= 0:
-                diff_bg = SUMMARY_DIFF_POSITIVE_COLOR
-                diff_fg = None
+            return entry
+
+        for col in ordered_columns:
+            label = header_names[col] if col < len(header_names) else ""
+            actual_val = actual_by_col.get(col, 0.0)
+            budget_val = budget_by_col.get(col, 0.0)
+            diff_val = diff_by_col.get(col, actual_val - budget_val)
+            if self.summary_cumulative_mode:
+                actual_display = cumulative_actual_by_col.get(col, actual_val)
+                budget_display = cumulative_budget_by_col.get(col, budget_val)
+                diff_display = cumulative_diff_by_col.get(col, diff_val)
+                contributors = cumulative_contributors_by_col.get(
+                    col, contributors_by_col.get(col, [])
+                )
             else:
-                diff_bg = SUMMARY_DIFF_NEGATIVE_BG_COLOR
-                diff_fg = SUMMARY_DIFF_NEGATIVE_FG_COLOR
-            contributors = col_totals.get("contributors", [])
-            tooltip = self._format_diff_tooltip("TOTAL", diff_val, contributors)
-            diff_line = {
-                "text": format_diff_value(diff_val),
-                "bg": diff_bg,
-            }
-            if diff_fg:
-                diff_line["fg"] = diff_fg
-            entry = {
+                actual_display = actual_val
+                budget_display = budget_val
+                diff_display = diff_val
+                contributors = contributors_by_col.get(col, [])
+            summary[col] = build_summary_entry(
+                label,
+                actual_display,
+                budget_display,
+                diff_display,
+                contributors,
+            )
+
+        if total_col_index not in summary and total_col_index >= 0:
+            label = "TOTAL"
+            col_totals = totals.get(total_col_index, {})
+            actual_val = col_totals.get("actual", 0.0)
+            budget_val = col_totals.get("budget", 0.0)
+            diff_val = col_totals.get("diff", actual_val - budget_val)
+            if self.summary_cumulative_mode:
+                actual_display = cumulative_actual_by_col.get(total_col_index, actual_val)
+                budget_display = cumulative_budget_by_col.get(total_col_index, budget_val)
+                diff_display = cumulative_diff_by_col.get(total_col_index, diff_val)
+                contributors = cumulative_contributors_by_col.get(
+                    total_col_index,
+                    list(col_totals.get("contributors", [])),
+                )
+            else:
+                actual_display = actual_val
+                budget_display = budget_val
+                diff_display = diff_val
+                contributors = col_totals.get("contributors", [])
+            summary[total_col_index] = build_summary_entry(
+                label,
+                actual_display,
+                budget_display,
+                diff_display,
+                contributors,
+            )
+
+        if toggle_column is not None and 0 <= toggle_column < len(header_names):
+            mode_text = "cumulativa" if self.summary_cumulative_mode else "mensile"
+            tooltip_text = (
+                "Clicca per tornare ai totali mensili"
+                if self.summary_cumulative_mode
+                else "Clicca per mostrare i totali cumulativi"
+            )
+            mode_bg = QColor("#C4D5FF") if self.summary_cumulative_mode else QColor("#C8EEDC")
+            toggle_font_size = max(6, SUMMARY_FONT_SIZE-2)
+            highlight_font_size = max(6, SUMMARY_FONT_SIZE -1)
+            summary[toggle_column] = {
                 "background": QBrush(QColor("#E8EAED")),
-                "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                "alignment": Qt.AlignmentFlag.AlignCenter,
                 "lines": [
-                    {"text": format_diff_value(actual_val), "bg": actual_bg},
-                    {"text": format_diff_value(budget_val), "bg": budget_bg},
-                    diff_line,
+                    {"text": "Modalità", "fg": QColor("#222"), "font_size": toggle_font_size},
+                    {"text": mode_text, "bg": mode_bg, "fg": QColor("#111"), "font_size": highlight_font_size},
+                    {"text": "Click per cambiare", "fg": QColor("#444"), "font_size": toggle_font_size},
                 ],
+                "tooltip": tooltip_text,
             }
-            if tooltip:
-                entry["tooltip"] = tooltip
-            summary[total_col_index] = entry
+
+        self.summary_header.configure_toggle(toggle_column, self.summary_cumulative_mode, self._on_summary_toggle_requested)
         self.summary_header.set_summary(summary)
 
     def _format_diff_tooltip(
@@ -1121,6 +1229,7 @@ class BudgetApp(QWidget):
 
         self.model.clear()
         self.summary_header.set_summary({})
+        self.summary_header.configure_toggle(None, self.summary_cumulative_mode)
         self.category_label_items = {}
         self.model.setHorizontalHeaderLabels(header_names)
         for col in range(self.model.columnCount()):
