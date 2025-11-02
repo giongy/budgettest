@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QHeaderView, QMessageBox, QFileDialog,
     QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
     QDialog, QTableWidget, QTableWidgetItem, QAbstractScrollArea,
+    QToolTip,
 )
-from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon, QStandardItem
+from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon, QStandardItem, QCursor
 from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -184,8 +185,8 @@ class CategoryDetailDialog(QDialog):
         self.setFont(popup_font)
         self._item_font = QFont(popup_font)
         # Previous default: QFont("Courier New", 14)
-        self.setMinimumSize(360, 300)
-        self.resize(620, 700)
+        self.setMinimumSize(420, 360)
+        self.resize(700, 820)
         self.setSizeGripEnabled(True)
 
         layout = QVBoxLayout(self)
@@ -247,11 +248,14 @@ class CategoryDetailDialog(QDialog):
         layout.addLayout(bulk_layout)
         layout.addSpacing(12)
 
-        self.chart_figure = Figure(figsize=(4.8, 2.4), dpi=100)
+        self.chart_figure = Figure(figsize=(5.6, 3.0), dpi=100)
         self.chart_canvas = FigureCanvasQTAgg(self.chart_figure)
-        self.chart_canvas.setMinimumHeight(200)
-        self.chart_canvas.setMaximumHeight(260)
+        self.chart_canvas.setMinimumHeight(320)
+        self.chart_canvas.setMaximumHeight(420)
         self.chart_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._chart_hover_cid = None
+        self._chart_hover_payload = None
+        self._chart_hover_last_index = None
         layout.addWidget(self.chart_canvas)
         layout.addSpacing(12)
 
@@ -410,31 +414,52 @@ class CategoryDetailDialog(QDialog):
     def _update_chart(self, rows: list[dict[str, Any]]):
         if not hasattr(self, "chart_figure"):
             return
+        QToolTip.hideText()
         self.chart_figure.clear()
         ax = self.chart_figure.add_subplot(111)
         ax.set_facecolor("#ffffff")
+        self._chart_hover_payload = None
+        self._chart_hover_last_index = None
         labels: list[str] = []
-        values: list[float] = []
+        actual_values: list[float] = []
+        budget_values: list[float] = []
 
         for row in rows or []:
             if row.get("row_role") != "month":
                 continue
             label = str(row.get("label", "")).strip()
-            val = row.get("actual_value")
-            if val is None:
+            actual_val = row.get("actual_value")
+            if actual_val is None:
                 try:
                     text = str(row.get("actual_text", "0")).replace(" ", "").replace(",", "")
-                    val = float(text) if text else 0.0
+                    actual_val = float(text) if text else 0.0
                 except Exception:
-                    val = 0.0
+                    actual_val = 0.0
+            budget_val = None
             try:
-                val_float = float(val)
+                budget_val = float(row.get("budget_value"))  # type: ignore[arg-type]
             except (TypeError, ValueError):
-                val_float = 0.0
+                budget_val = None
+            if budget_val is None:
+                try:
+                    budget_text = str(row.get("budget_text", "0")).replace(" ", "").replace(",", "")
+                    budget_val = float(budget_text) if budget_text else 0.0
+                except Exception:
+                    budget_val = 0.0
+            try:
+                actual_float = float(actual_val)
+            except (TypeError, ValueError):
+                actual_float = 0.0
+            try:
+                budget_float = float(budget_val)
+            except (TypeError, ValueError):
+                budget_float = 0.0
             labels.append(label or "")
-            values.append(val_float)
+            actual_values.append(actual_float)
+            budget_values.append(budget_float)
 
-        if not values:
+        if not labels:
+            QToolTip.hideText()
             self.chart_figure.subplots_adjust(left=0.1, right=0.9, top=0.85, bottom=0.25)
             ax.axis("off")
             ax.text(
@@ -449,29 +474,93 @@ class CategoryDetailDialog(QDialog):
             self.chart_canvas.draw_idle()
             return
 
-        xs = list(range(len(values)))
+        actual_cumulative: list[float] = []
+        budget_cumulative: list[float] = []
+        running_actual = 0.0
+        running_budget = 0.0
+        for actual, budget in zip(actual_values, budget_values):
+            running_actual += actual
+            running_budget += budget
+            actual_cumulative.append(running_actual)
+            budget_cumulative.append(running_budget)
+
+        xs = list(range(len(labels)))
         ax.plot(
             xs,
-            values,
+            actual_cumulative,
             color="#2c7a7b",
             marker="o",
-            linewidth=2,
-            markersize=5,
-            label="Actual",
+            linewidth=1.2,
+            markersize=4,
+            label="Actual cumulativo",
+        )
+        ax.plot(
+            xs,
+            budget_cumulative,
+            color="#2563eb",
+            marker="s",
+            linewidth=1.2,
+            markersize=3.5,
+            label="Budget cumulativo",
         )
         ax.set_xticks(xs)
         ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#1f2937")
         ax.tick_params(axis="y", labelsize=8, colors="#1f2937")
-        ax.set_title("Actual - andamento mensile", fontsize=10, color="#1f2937", pad=8)
+        ax.set_title("Andamento cumulativo actual vs budget", fontsize=10, color="#1f2937", pad=8)
+        ax.set_ylabel("Importo cumulativo", fontsize=8, color="#1f2937")
         ax.grid(axis="y", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
         ax.margins(x=0.05, y=0.2)
-        handles, labels_legend = ax.get_legend_handles_labels()
-        if labels_legend:
-            ax.legend(loc="upper right", fontsize=8, frameon=False)
-        self.chart_figure.subplots_adjust(left=0.12, right=0.97, top=0.9, bottom=0.32)
+        ax.legend(loc="upper left", fontsize=8, frameon=False)
+        self.chart_figure.subplots_adjust(left=0.12, right=0.97, top=0.88, bottom=0.32)
+        self._chart_hover_payload = {
+            "axes": ax,
+            "xs": xs,
+            "labels": labels,
+            "series": [
+                ("Actual cumulativo", actual_cumulative),
+                ("Budget cumulativo", budget_cumulative),
+            ],
+        }
+        if self._chart_hover_cid is None:
+            self._chart_hover_cid = self.chart_canvas.mpl_connect("motion_notify_event", self._on_chart_hover)
         self.chart_canvas.draw_idle()
+
+    def _on_chart_hover(self, event):
+        payload = getattr(self, "_chart_hover_payload", None)
+        if not payload:
+            if self._chart_hover_last_index is not None:
+                QToolTip.hideText()
+                self._chart_hover_last_index = None
+            return
+        if event.inaxes != payload["axes"] or event.xdata is None:
+            if self._chart_hover_last_index is not None:
+                QToolTip.hideText()
+                self._chart_hover_last_index = None
+            return
+        xs = payload["xs"]
+        if not xs:
+            return
+        x_value = event.xdata
+        nearest_idx = int(round(x_value))
+        if nearest_idx < 0 or nearest_idx >= len(xs) or abs(x_value - xs[nearest_idx]) > 0.3:
+            if self._chart_hover_last_index is not None:
+                QToolTip.hideText()
+                self._chart_hover_last_index = None
+            return
+        if nearest_idx == self._chart_hover_last_index:
+            return
+        labels = payload["labels"]
+        text_lines = [labels[nearest_idx]]
+        for series_label, series_values in payload["series"]:
+            try:
+                value = series_values[nearest_idx]
+            except IndexError:
+                value = 0.0
+            text_lines.append(f"{series_label}: {format_diff_value(value)}")
+        QToolTip.showText(QCursor.pos(), "\n".join(text_lines), self.chart_canvas)
+        self._chart_hover_last_index = nearest_idx
 
     def _parse_bulk_input(self) -> float | None:
         text = (self.bulk_input.text() or "").strip()
@@ -1179,6 +1268,7 @@ class BudgetApp(QWidget):
                     "actual_value": actual_value,
                     "budget_text": budget_text or "0",
                     "budget_color": budget_color,
+                    "budget_value": budget_value,
                     "diff_text": diff_text or "0",
                     "diff_background": diff_bg,
                     "budget_index": budget_index,
