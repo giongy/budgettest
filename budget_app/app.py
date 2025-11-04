@@ -74,6 +74,8 @@ ITALIAN_MONTH_NAMES = {
     "12": "Dicembre",
 }
 
+MONTH_NAME_TO_NUMBER = {name: int(code) for code, name in ITALIAN_MONTH_NAMES.items()}
+
 
 def get_resource_path(name: str) -> Path:
     """Return resource path, compatible with PyInstaller one-file bundles."""
@@ -171,7 +173,7 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
 
 
 class CategoryDetailDialog(QDialog):
-    def __init__(self, parent, category_name: str, main_category_name: str, data_provider, copy_handler, value_handler):
+    def __init__(self, parent, category_name: str, main_category_name: str, year_text: str, data_provider, copy_handler, value_handler):
         super().__init__(parent)
         self.setModal(True)
         self.setWindowTitle(f"Dettaglio categoria - {category_name}")
@@ -181,12 +183,14 @@ class CategoryDetailDialog(QDialog):
         self._category_name = category_name
         self._main_category_name = main_category_name
         self._bulk_budget_indexes: list[QModelIndex] = []
+        self._bulk_month_entries: list[tuple[int, QModelIndex]] = []
+        self._year_text = year_text or ""
         popup_font = QFont(DETAIL_FONT_FAMILY, DETAIL_FONT_SIZE)
         self.setFont(popup_font)
         self._item_font = QFont(popup_font)
         # Previous default: QFont("Courier New", 14)
-        self.setMinimumSize(420, 360)
-        self.resize(700, 820)
+        self.setMinimumSize(470, 380)
+        self.resize(780, 900)
         self.setSizeGripEnabled(True)
 
         layout = QVBoxLayout(self)
@@ -197,8 +201,45 @@ class CategoryDetailDialog(QDialog):
         self.header_label.setFont(header_font)
         self.header_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.header_label.setText(self._compose_header_text())
-        layout.addWidget(self.header_label)
-        layout.addSpacing(8)
+        self.header_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self.bulk_input = QLineEdit()
+        self.bulk_input.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.bulk_input.setPlaceholderText("0,00")
+        self.bulk_input.setClearButtonEnabled(True)
+        self.bulk_input.setFixedWidth(120)
+        bulk_label = QLabel("Valore budget:")
+        bulk_label.setFont(self._item_font)
+        value_controls_layout = QHBoxLayout()
+        value_controls_layout.setContentsMargins(0, 0, 0, 0)
+        value_controls_layout.setSpacing(8)
+        value_controls_layout.addWidget(bulk_label)
+        value_controls_layout.addWidget(self.bulk_input)
+        self.monthly_btn = QPushButton("Mensile")
+        self.monthly_btn.clicked.connect(self._apply_monthly_value)
+        value_controls_layout.addWidget(self.monthly_btn)
+        self.annual_btn = QPushButton("Annuale")
+        self.annual_btn.clicked.connect(self._apply_annual_value)
+        value_controls_layout.addWidget(self.annual_btn)
+        self.clear_btn = QPushButton("Svuota")
+        self.clear_btn.clicked.connect(self._clear_values)
+        value_controls_layout.addWidget(self.clear_btn)
+        self.match_until_btn = QPushButton("Pareggia fino")
+        self.match_until_btn.clicked.connect(self._match_actual_values_until_previous_month)
+        value_controls_layout.addWidget(self.match_until_btn)
+        self.match_all_btn = QPushButton("Pareggia tutto")
+        self.match_all_btn.clicked.connect(self._match_actual_values)
+        value_controls_layout.addWidget(self.match_all_btn)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(12)
+        header_layout.addWidget(self.header_label)
+        header_layout.addStretch()
+        header_layout.addLayout(value_controls_layout)
+
+        layout.addLayout(header_layout)
+        layout.addSpacing(12)
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels(["Periodo", "Actual", "Budget", "Diff", ""])
         self.table.setFont(popup_font)
@@ -226,38 +267,16 @@ class CategoryDetailDialog(QDialog):
         layout.addWidget(self.table, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addSpacing(12)
 
-        bulk_layout = QHBoxLayout()
-        bulk_layout.setSpacing(8)
-        bulk_label = QLabel("Valore budget:")
-        bulk_label.setFont(self._item_font)
-        bulk_layout.addStretch()
-        bulk_layout.addWidget(bulk_label)
-        self.bulk_input = QLineEdit()
-        self.bulk_input.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.bulk_input.setPlaceholderText("0,00")
-        self.bulk_input.setClearButtonEnabled(True)
-        self.bulk_input.setFixedWidth(120)
-        bulk_layout.addWidget(self.bulk_input)
-        self.monthly_btn = QPushButton("Mensile")
-        self.monthly_btn.clicked.connect(self._apply_monthly_value)
-        bulk_layout.addWidget(self.monthly_btn)
-        self.annual_btn = QPushButton("Annuale")
-        self.annual_btn.clicked.connect(self._apply_annual_value)
-        bulk_layout.addWidget(self.annual_btn)
-        bulk_layout.addStretch()
-        layout.addLayout(bulk_layout)
-        layout.addSpacing(12)
-
-        self.chart_figure = Figure(figsize=(5.6, 3.0), dpi=100)
+        self.chart_figure = Figure(figsize=(5.6, 4.8), dpi=100)
         self.chart_canvas = FigureCanvasQTAgg(self.chart_figure)
-        self.chart_canvas.setMinimumHeight(320)
-        self.chart_canvas.setMaximumHeight(420)
+        self.chart_canvas.setMinimumHeight(440)
+        self.chart_canvas.setMaximumHeight(640)
         self.chart_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._chart_hover_cid = None
         self._chart_hover_payload = None
         self._chart_hover_last_index = None
         layout.addWidget(self.chart_canvas)
-        layout.addSpacing(12)
+        layout.addSpacing(8)
 
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
@@ -289,8 +308,10 @@ class CategoryDetailDialog(QDialog):
         separator_rows: list[int] = []
         self.table.setRowCount(len(rows))
         self._bulk_budget_indexes = []
+        self._bulk_month_entries = []
         for row_idx, row in enumerate(rows):
             row_role = row.get("row_role", "month")
+            row_label = (row.get("label", "") or "").strip()
 
             if row_role == "separator":
                 self.table.setSpan(row_idx, 0, 1, self.table.columnCount())
@@ -306,7 +327,7 @@ class CategoryDetailDialog(QDialog):
                 continue
 
             self.table.verticalHeader().setSectionResizeMode(row_idx, QHeaderView.ResizeMode.ResizeToContents)
-            label_item = QTableWidgetItem(row.get("label", ""))
+            label_item = QTableWidgetItem(row_label)
             label_item.setForeground(QBrush(QColor("#111")))
             label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             label_item.setFont(self._item_font)
@@ -353,6 +374,14 @@ class CategoryDetailDialog(QDialog):
                 self.table.setCellWidget(row_idx, 4, btn)
                 if row_role == "month":
                     self._bulk_budget_indexes.append(index)
+                    month_num = MONTH_NAME_TO_NUMBER.get(row_label)
+                    if month_num is None and len(row_label) == 7 and row_label[4] == "-":
+                        try:
+                            month_num = int(row_label[5:])
+                        except ValueError:
+                            month_num = None
+                    if month_num is not None:
+                        self._bulk_month_entries.append((month_num, index))
             else:
                 dummy = QWidget(self.table)
                 self.table.setCellWidget(row_idx, 4, dummy)
@@ -625,6 +654,62 @@ class CategoryDetailDialog(QDialog):
         self._reload()
         self.bulk_input.setFocus()
         self.bulk_input.selectAll()
+
+    def _clear_values(self):
+        if not self._bulk_budget_indexes:
+            QMessageBox.information(self, "Nessun mese disponibile", "Non ci sono mesi modificabili per questa categoria.")
+            return
+        if not self.value_handler:
+            return
+        for idx in self._bulk_budget_indexes:
+            if isinstance(idx, QModelIndex) and idx.isValid():
+                self.value_handler(idx, "")
+        self._reload()
+        self.bulk_input.clear()
+        self.bulk_input.setFocus()
+
+    def _match_actual_values_until_previous_month(self):
+        if not self._bulk_month_entries:
+            QMessageBox.information(self, "Nessun mese disponibile", "Non ci sono mesi modificabili per questa categoria.")
+            return
+        if not self.copy_handler:
+            return
+        year_text = (self._year_text or "").strip()
+        try:
+            year_int = int(year_text)
+        except (TypeError, ValueError):
+            return
+        today = datetime.today()
+        if year_int > today.year:
+            return
+        if year_int == today.year:
+            limit_month = today.month - 1
+            if limit_month <= 0:
+                return
+        else:
+            limit_month = 12
+        applied = False
+        for month_num, idx in self._bulk_month_entries:
+            if month_num <= limit_month and isinstance(idx, QModelIndex) and idx.isValid():
+                self.copy_handler(idx)
+                applied = True
+        if applied:
+            self._reload()
+            self.bulk_input.clear()
+            self.bulk_input.setFocus()
+
+    def _match_actual_values(self):
+        if not self._bulk_budget_indexes:
+            QMessageBox.information(self, "Nessun mese disponibile", "Non ci sono mesi modificabili per questa categoria.")
+            return
+        if not self.copy_handler:
+            return
+        for idx in self._bulk_budget_indexes:
+            if isinstance(idx, QModelIndex) and idx.isValid():
+                self.copy_handler(idx)
+        self._reload()
+        self.bulk_input.clear()
+        self.bulk_input.setFocus()
 
 
 class BudgetApp(QWidget):
@@ -1180,6 +1265,7 @@ class BudgetApp(QWidget):
             self,
             name,
             main_name,
+            self.year_cb.currentText() if hasattr(self, "year_cb") else "",
             lambda cid=cid: self._category_detail_rows(cid),
             self._copy_budget_from_detail,
             self._update_budget_from_detail,

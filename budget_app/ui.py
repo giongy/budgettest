@@ -389,6 +389,7 @@ class SummaryHeaderView(QHeaderView):
         self._pending_tooltip_index: int | None = None
         self._pending_tooltip_pos = QPoint()
         self._tooltip_visible = False
+        self._toggle_cursor_active = False
 
     def set_summary(self, summary: dict[int, Any] | None):
         self._summary = summary or {}
@@ -505,6 +506,18 @@ class SummaryHeaderView(QHeaderView):
         super().mouseMoveEvent(event)
         pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
         logical_index = self.logicalIndexAt(pos)
+        is_toggle_hover = (
+            self._toggle_column is not None
+            and logical_index == self._toggle_column
+            and not self._toggle_rect.isNull()
+            and self._toggle_rect.contains(pos)
+        )
+        if is_toggle_hover and not self._toggle_cursor_active:
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+            self._toggle_cursor_active = True
+        elif not is_toggle_hover and self._toggle_cursor_active:
+            self.viewport().unsetCursor()
+            self._toggle_cursor_active = False
         tooltip = self._tooltip_text_for_index(logical_index)
         if tooltip:
             if self._tooltip_visible and logical_index == self._pending_tooltip_index:
@@ -547,6 +560,9 @@ class SummaryHeaderView(QHeaderView):
             self._tooltip_visible = False
         if self._toggle_rect and not self._toggle_rect.isNull():
             self._toggle_rect = QRect()
+        if self._toggle_cursor_active:
+            self.viewport().unsetCursor()
+            self._toggle_cursor_active = False
         super().leaveEvent(event)
 
     def event(self, event):
