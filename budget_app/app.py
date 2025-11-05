@@ -27,6 +27,7 @@ from .ui import (
     make_item,
     PeriodDelegate,
     ButtonDelegate,
+    BudgetAmountDelegate,
     DividerDelegate,
     SummaryHeaderView,
     BudgetTreeView,
@@ -248,6 +249,8 @@ class CategoryDetailDialog(QDialog):
             | QAbstractItemView.EditTrigger.SelectedClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
         )
+        self._budget_delegate = BudgetAmountDelegate(self.table)
+        self.table.setItemDelegateForColumn(2, self._budget_delegate)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setMinimumSectionSize(0)
@@ -829,6 +832,7 @@ class BudgetApp(QWidget):
         layout.addWidget(self.view)
 
         self.default_delegate = self.view.itemDelegate()
+        self.budget_amount_delegate = BudgetAmountDelegate(self.view)
         self.period_delegate = PeriodDelegate()
         self.budget_button_delegate = ButtonDelegate(self.view, self.apply_actual_to_budget)
         self.total_divider_delegate = DividerDelegate(self.view)
@@ -1411,6 +1415,8 @@ class BudgetApp(QWidget):
         for col in range(self.model.columnCount()):
             self.view.setItemDelegateForColumn(col, self.default_delegate)
         self.view.setItemDelegateForColumn(0, self.category_detail_delegate)
+        if entries and self.model.columnCount() > 1:
+            self.view.setItemDelegateForColumn(1, self.budget_amount_delegate)
         self._apply_column_widths(header_names)
         for col in range(1, len(header_names)):
             if header_names[col] == "Period":

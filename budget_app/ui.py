@@ -1,4 +1,4 @@
-﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader, QToolTip
+﻿from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QStyleOptionViewItem, QStyle, QApplication, QHeaderView, QStyleOptionHeader, QToolTip, QLineEdit
 from PyQt6.QtWidgets import QTreeView
 from pathlib import Path
 
@@ -7,8 +7,17 @@ from typing import Any, Callable
 from PyQt6.QtGui import QStandardItem, QFont, QBrush, QColor, QCursor, QPainter, QPixmap, QPen, QHelpEvent
 from PyQt6.QtCore import Qt, QRect, QSize, QEvent, QTimer, QPoint
 
-from .config import PERIOD_CHOICES
-from .style import UI_FONT_FAMILY, UI_BASE_FONT_SIZE, UI_BOLD_FONT_SIZE, SUMMARY_FONT_SIZE
+try:
+    from .config import PERIOD_CHOICES
+    from .style import UI_FONT_FAMILY, UI_BASE_FONT_SIZE, UI_BOLD_FONT_SIZE, SUMMARY_FONT_SIZE
+except ImportError:
+    # Allow running this module as a script during ad-hoc tests
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from budget_app.config import PERIOD_CHOICES
+    from budget_app.style import UI_FONT_FAMILY, UI_BASE_FONT_SIZE, UI_BOLD_FONT_SIZE, SUMMARY_FONT_SIZE
 
 
 def make_item(text="", editable=False, meta=None, bold=False, color=None):
@@ -43,6 +52,30 @@ class PeriodDelegate(QStyledItemDelegate):
         model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
 
 
+def _schedule_budget_editor_selection(editor: Any, index: Any):
+    if not isinstance(editor, QLineEdit):
+        return
+    meta = index.data(Qt.ItemDataRole.UserRole) if hasattr(index, "data") else None
+    if meta is not None:
+        if isinstance(meta, tuple):
+            if not meta or meta[0] != "budget":
+                return
+        else:
+            if not hasattr(meta, "isValid") or not meta.isValid():
+                return
+    def _apply_selection():
+        text_val = editor.text()
+        if not text_val:
+            return
+        stripped = text_val.lstrip()
+        offset = len(text_val) - len(stripped)
+        if stripped.startswith("-") and len(stripped) > 1:
+            editor.setSelection(offset + 1, len(stripped) - 1)
+        elif text_val:
+            editor.selectAll()
+    QTimer.singleShot(0, _apply_selection)
+
+
 class ButtonDelegate(QStyledItemDelegate):
     def __init__(self, parent, callback):
         super().__init__(parent)
@@ -55,6 +88,10 @@ class ButtonDelegate(QStyledItemDelegate):
         self._pressed = None
         icon_path = Path(__file__).resolve().parent.parent / "pari.png"
         self.icon_pixmap = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
+
+    def setEditorData(self, editor, index):
+        super().setEditorData(editor, index)
+        _schedule_budget_editor_selection(editor, index)
 
     def _is_main_category_budget(self, index) -> bool:
         if not index.isValid():
@@ -196,6 +233,12 @@ class ButtonDelegate(QStyledItemDelegate):
             return False
 
         return super().editorEvent(event, model, option, index)
+
+
+class BudgetAmountDelegate(QStyledItemDelegate):
+    def setEditorData(self, editor, index):
+        super().setEditorData(editor, index)
+        _schedule_budget_editor_selection(editor, index)
 
 
 class CategoryDetailDelegate(QStyledItemDelegate):
