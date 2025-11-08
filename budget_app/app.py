@@ -1130,12 +1130,15 @@ class BudgetApp(QWidget):
                 entry["tooltip"] = tooltip
             return entry
 
+        has_month_columns = bool(month_columns)
         for col in ordered_columns:
             label = header_names[col] if col < len(header_names) else ""
             actual_val = actual_by_col.get(col, 0.0)
             budget_val = budget_by_col.get(col, 0.0)
             diff_val = diff_by_col.get(col, actual_val - budget_val)
-            if self.summary_cumulative_mode:
+            is_total_column = header_names[col].upper() == "TOTAL" if col < len(header_names) else False
+            use_cumulative_display = self.summary_cumulative_mode or (is_total_column and has_month_columns)
+            if use_cumulative_display:
                 actual_display = cumulative_actual_by_col.get(col, actual_val)
                 budget_display = cumulative_budget_by_col.get(col, budget_val)
                 diff_display = cumulative_diff_by_col.get(col, diff_val)
@@ -1161,7 +1164,10 @@ class BudgetApp(QWidget):
             actual_val = col_totals.get("actual", 0.0)
             budget_val = col_totals.get("budget", 0.0)
             diff_val = col_totals.get("diff", actual_val - budget_val)
-            if self.summary_cumulative_mode:
+            use_cumulative_display = self.summary_cumulative_mode or (
+                has_month_columns and total_col_index in cumulative_actual_by_col
+            )
+            if use_cumulative_display:
                 actual_display = cumulative_actual_by_col.get(total_col_index, actual_val)
                 budget_display = cumulative_budget_by_col.get(total_col_index, budget_val)
                 diff_display = cumulative_diff_by_col.get(total_col_index, diff_val)
