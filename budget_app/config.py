@@ -71,22 +71,24 @@ def _save_cfg(cfg: configparser.ConfigParser) -> None:
         cfg.write(f)
 
 
-def load_last_db() -> Path:
+def load_last_db() -> Path | None:
     cfg = _load_cfg()
     db_path = cfg.get("app", "db_path", fallback=None)
     if db_path:
-        path = Path(db_path)
+        path = Path(db_path).expanduser()
         if path.exists():
             return path
-    # default fallback within workspace
-    return Path(r"D:\budgettest\mmex_casa.mmb")
+    return None
 
 
-def save_last_db(path: Path) -> None:
+def save_last_db(path: Path | None) -> None:
     cfg = _load_cfg()
     if "app" not in cfg:
         cfg["app"] = {}
-    cfg["app"]["db_path"] = str(path)
+    if path:
+        cfg["app"]["db_path"] = str(path)
+    else:
+        cfg["app"].pop("db_path", None)
     _save_cfg(cfg)
 
 
@@ -135,4 +137,4 @@ def load_style_settings() -> dict[str, Any]:
 
 
 # Mutable global used by db.get_conn; always reference via config.DB_PATH
-DB_PATH: Path = load_last_db()
+DB_PATH: Path | None = load_last_db()

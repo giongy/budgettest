@@ -1,4 +1,5 @@
 import sys
+import sqlite3
 from pathlib import Path
 from typing import Any
 from datetime import datetime
@@ -727,8 +728,15 @@ class BudgetApp(QWidget):
         height = int(screen.height() * WINDOW_SCALE_RATIO)
         self.resize(width, height)
         self.move(screen.center() - self.rect().center())
-        self.years, self.per_year_entries, self.name_to_id = load_budgetyear_map()
-        self.id2name, self.children_map, self.root_ids = load_categories()
+        self.years: list[str] = []
+        self.per_year_entries: dict[str, list[tuple[int, str]]] = {}
+        self.name_to_id: dict[str, int] = {}
+        self.id2name: dict[int, str] = {}
+        self.children_map: dict[int, list[int]] = {}
+        self.root_ids: list[int] = []
+        self._pending_db_error: str | None = None
+        self._should_prompt_db_dialog = False
+        self._load_data_for_current_db(show_errors=False)
         self.edits = {}
         self._recalc_guard = False  # prevents saving of auto-calculated updates
         self._has_unsaved_changes = False
@@ -765,13 +773,10 @@ class BudgetApp(QWidget):
         year_label = QLabel("Year:")
         control_layout.addWidget(year_label)
         self.year_cb = QComboBox()
-        self.year_cb.addItems(self.years or [])
         self.year_cb.setMinimumWidth(110)
-        last_year = config.load_last_budget_year()
-        if last_year and last_year in (self.years or []):
-            self.year_cb.setCurrentText(last_year)
         self.year_cb.currentTextChanged.connect(self._on_year_changed)
         control_layout.addWidget(self.year_cb)
+        initial_year = self._populate_year_combobox()
 
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setMinimumWidth(100)
@@ -841,11 +846,17 @@ class BudgetApp(QWidget):
         self.view.doubleClicked.connect(self.on_view_double_clicked)
         self.current_headers: list[str] = []
         self.category_label_items: dict[Any, QStandardItem] = {}
+        self.category_totals: dict[int, dict[str, float]] = {}
         self.apply_light_theme()
         self._db_label_fulltext = ""
         self._set_db_path_label(config.DB_PATH)
         QTimer.singleShot(0, self._update_db_label_text)
-        self.refresh()
+        if initial_year:
+            self._on_year_changed(initial_year)
+        else:
+            self.refresh()
+        if self._pending_db_error:
+            QTimer.singleShot(0, self._show_pending_db_error)
 
     def _set_unsaved_changes(self, dirty: bool):
         self._has_unsaved_changes = dirty
@@ -885,6 +896,81 @@ class BudgetApp(QWidget):
         metrics = self.db_label.fontMetrics()
         elided = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, available)
         self.db_label.setText(elided)
+
+    def _populate_year_combobox(self) -> str:
+        saved_year = config.load_last_budget_year()
+        selected = ""
+        if not hasattr(self, "year_cb"):
+            return selected
+        self.year_cb.blockSignals(True)
+        self.year_cb.clear()
+        self.year_cb.addItems(self.years or [])
+        if saved_year and saved_year in (self.years or []):
+            self.year_cb.setCurrentText(saved_year)
+            selected = saved_year
+        elif self.years:
+            self.year_cb.setCurrentIndex(0)
+            selected = self.year_cb.currentText()
+        else:
+            self.year_cb.setCurrentIndex(-1)
+        self.year_cb.blockSignals(False)
+        return selected
+
+    def _load_data_for_current_db(self, show_errors: bool = True) -> bool:
+        self._pending_db_error = None
+        self._should_prompt_db_dialog = False
+        db_path = config.DB_PATH
+        if not db_path:
+            message = "Nessun database configurato. Usa 'Select DB' per scegliere un file Money Manager (.mmb)."
+            if show_errors:
+                QMessageBox.warning(self, "Database mancante", message)
+            else:
+                self._pending_db_error = message
+            self._should_prompt_db_dialog = True
+            return False
+        if not db_path.exists():
+            message = f"Il file '{db_path}' non esiste. Seleziona un database valido."
+            if show_errors:
+                QMessageBox.warning(self, "Database non trovato", message)
+            else:
+                self._pending_db_error = message
+            self._should_prompt_db_dialog = True
+            return False
+        try:
+            years, per_year_entries, name_to_id = load_budgetyear_map()
+            id2name, children_map, root_ids = load_categories()
+        except sqlite3.Error as exc:
+            message = f"Errore durante la lettura del database:\n{exc}"
+            if show_errors:
+                QMessageBox.critical(self, "Errore database", message)
+            else:
+                self._pending_db_error = message
+            self._should_prompt_db_dialog = True
+            return False
+        except Exception as exc:
+            message = f"Errore inatteso durante il caricamento del database:\n{exc}"
+            if show_errors:
+                QMessageBox.critical(self, "Errore database", message)
+            else:
+                self._pending_db_error = message
+            self._should_prompt_db_dialog = True
+            return False
+        self.years = years
+        self.per_year_entries = per_year_entries
+        self.name_to_id = name_to_id
+        self.id2name = id2name
+        self.children_map = children_map
+        self.root_ids = root_ids
+        return True
+
+    def _show_pending_db_error(self):
+        if not self._pending_db_error:
+            return
+        QMessageBox.warning(self, "Database non disponibile", self._pending_db_error)
+        self._pending_db_error = None
+        if self._should_prompt_db_dialog:
+            self._should_prompt_db_dialog = False
+            self.select_db()
 
     def _display_header_name(self, raw: str) -> str:
         if isinstance(raw, str) and len(raw) == 7 and raw[4] == "-":
@@ -2210,28 +2296,22 @@ class BudgetApp(QWidget):
         file, _ = QFileDialog.getOpenFileName(
             self, "Select DB", str(Path.home()), "SQLite (*.mmb *.db)"
         )
-        if file:
-            config.DB_PATH = Path(file)
-            config.save_last_db(config.DB_PATH)
-            self._set_db_path_label(config.DB_PATH)
-            self.years, self.per_year_entries, self.name_to_id = load_budgetyear_map()
-            self.id2name, self.children_map, self.root_ids = load_categories()
-            saved_year = config.load_last_budget_year()
-            self.year_cb.blockSignals(True)
-            self.year_cb.clear()
-            self.year_cb.addItems(self.years or [])
-            selected = ""
-            if saved_year and saved_year in (self.years or []):
-                self.year_cb.setCurrentText(saved_year)
-                selected = saved_year
-            elif self.years:
-                self.year_cb.setCurrentIndex(0)
-                selected = self.year_cb.currentText()
-            self.year_cb.blockSignals(False)
-            if selected:
-                self._on_year_changed(selected)
-            else:
-                self.refresh()
+        if not file:
+            return
+        new_path = Path(file)
+        previous_path = config.DB_PATH
+        config.DB_PATH = new_path
+        if not self._load_data_for_current_db(show_errors=True):
+            config.DB_PATH = previous_path
+            self._set_db_path_label(previous_path)
+            return
+        config.save_last_db(new_path)
+        self._set_db_path_label(new_path)
+        selected = self._populate_year_combobox()
+        if selected:
+            self._on_year_changed(selected)
+        else:
+            self.refresh()
 
 
 def main():
