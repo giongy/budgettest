@@ -716,6 +716,313 @@ class CategoryDetailDialog(QDialog):
         self.bulk_input.setFocus()
 
 
+class AllCategoriesDiffDialog(QDialog):
+    def __init__(self, parent, year_text: str, data_provider):
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowTitle("Dettaglio differenze - tutte le categorie")
+        self.data_provider = data_provider
+        self._year_text = year_text or ""
+        popup_font = QFont(DETAIL_FONT_FAMILY, DETAIL_FONT_SIZE)
+        self.setFont(popup_font)
+        self._item_font = QFont(popup_font)
+        self.setMinimumSize(520, 360)
+        self.resize(820, 720)
+        self.setSizeGripEnabled(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        header_font = QFont(self._item_font)
+        header_font.setBold(True)
+        self.header_label = QLabel(self)
+        self.header_label.setFont(header_font)
+        self.header_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        if self._year_text:
+            self.header_label.setText(f"Tutte le categorie (diff cumulativa) - {self._year_text}")
+        else:
+            self.header_label.setText("Tutte le categorie (diff cumulativa)")
+        self.header_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.header_label)
+
+        layout.addSpacing(10)
+        self.table = QTableWidget(0, 4, self)
+        self.table.setHorizontalHeaderLabels(["Periodo", "Reale mensile", "Budget mensile", "Diff cumulativa"])
+        self.table.setFont(popup_font)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setMinimumSectionSize(0)
+        self.table.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self.table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        header = self.table.horizontalHeader()
+        header.setFont(popup_font)
+        for col in range(self.table.columnCount()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+        header.setMinimumSectionSize(40)
+        header.resizeSection(0, 150)
+        header.resizeSection(1, 120)
+        header.resizeSection(2, 120)
+        header.resizeSection(3, 130)
+        layout.addWidget(self.table, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addSpacing(10)
+
+        self.chart_figure = Figure(figsize=(5.6, 4.8), dpi=100)
+        self.chart_canvas = FigureCanvasQTAgg(self.chart_figure)
+        self.chart_canvas.setMinimumHeight(420)
+        self.chart_canvas.setMaximumHeight(640)
+        self.chart_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._chart_hover_cid = None
+        self._chart_hover_payload = None
+        self._chart_hover_last_index = None
+        layout.addWidget(self.chart_canvas)
+        layout.addSpacing(8)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+        close_btn = QPushButton("Chiudi")
+        close_btn.clicked.connect(self.close)
+        buttons_layout.addWidget(close_btn)
+        layout.addLayout(buttons_layout)
+
+        self._reload()
+
+    def _reload(self):
+        rows = self.data_provider() or []
+        separator_rows: list[int] = []
+        self.table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            row_role = row.get("row_role", "month")
+            if row_role == "separator":
+                self.table.setSpan(row_idx, 0, 1, self.table.columnCount())
+                line_widget = QWidget(self.table)
+                line_widget.setMinimumHeight(2)
+                line_widget.setMaximumHeight(2)
+                line_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                line_widget.setStyleSheet("background-color: #000000; margin: 0px; padding: 0px;")
+                self.table.setCellWidget(row_idx, 0, line_widget)
+                self.table.verticalHeader().setSectionResizeMode(row_idx, QHeaderView.ResizeMode.Fixed)
+                self.table.setRowHeight(row_idx, 2)
+                separator_rows.append(row_idx)
+                continue
+
+            label_item = QTableWidgetItem(str(row.get("label", "")))
+            label_item.setForeground(QBrush(QColor("#111")))
+            label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            label_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 0, label_item)
+
+            actual_val = float(row.get("actual_diff", 0.0) or 0.0)
+            budget_val = float(row.get("budget_diff", 0.0) or 0.0)
+            gap_val = float(row.get("gap_diff", actual_val - budget_val) or 0.0)
+
+            actual_item = QTableWidgetItem(format_diff_value(actual_val))
+            actual_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            actual_item.setFlags(actual_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            actual_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 1, actual_item)
+
+            budget_item = QTableWidgetItem(format_diff_value(budget_val))
+            budget_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            budget_item.setFlags(budget_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            budget_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 2, budget_item)
+
+            gap_item = QTableWidgetItem(format_diff_value(gap_val))
+            gap_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            gap_item.setFlags(gap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            gap_item.setFont(self._item_font)
+            gap_item.setBackground(diff_background(gap_val))
+            self.table.setItem(row_idx, 3, gap_item)
+
+            if row_role == "total":
+                for col in range(0, 4):
+                    item = self.table.item(row_idx, col)
+                    if item is not None:
+                        font = item.font()
+                        font.setBold(True)
+                        item.setFont(font)
+
+        self._update_chart(rows)
+
+        self.table.resizeRowsToContents()
+        width_targets = {0: 150, 1: 120, 2: 120, 3: 130}
+        for col, target in width_targets.items():
+            if col < self.table.columnCount():
+                self.table.setColumnWidth(col, target)
+        self.table.horizontalHeader().setStretchLastSection(False)
+
+        for idx in separator_rows:
+            self.table.verticalHeader().setSectionResizeMode(idx, QHeaderView.ResizeMode.Fixed)
+            self.table.setRowHeight(idx, 2)
+        total_width = self.table.verticalHeader().width() + self.table.frameWidth() * 2
+        if self.table.verticalScrollBar().isVisible():
+            total_width += self.table.verticalScrollBar().width()
+        for col in range(self.table.columnCount()):
+            total_width += self.table.columnWidth(col)
+        self.table.setMinimumWidth(total_width)
+        self.table.setMaximumWidth(total_width)
+
+        total_height = self.table.horizontalHeader().height() + self.table.frameWidth() * 2
+        if self.table.horizontalScrollBar().isVisible():
+            total_height += self.table.horizontalScrollBar().height()
+        for row in range(self.table.rowCount()):
+            total_height += self.table.rowHeight(row)
+        self.table.setMinimumHeight(total_height)
+        self.table.setMaximumHeight(total_height)
+
+    def _update_chart(self, rows: list[dict[str, Any]]):
+        if not hasattr(self, "chart_figure"):
+            return
+        QToolTip.hideText()
+        self.chart_figure.clear()
+        ax = self.chart_figure.add_subplot(111)
+        ax.set_facecolor("#ffffff")
+        self._chart_hover_payload = None
+        self._chart_hover_last_index = None
+        labels: list[str] = []
+        actual_values: list[float] = []
+        budget_values: list[float] = []
+        gap_values: list[float] = []
+
+        for row in rows or []:
+            if row.get("row_role") != "month":
+                continue
+            label = str(row.get("label", "")).strip()
+            actual_val = float(row.get("actual_diff", 0.0) or 0.0)
+            budget_val = float(row.get("budget_diff", 0.0) or 0.0)
+            gap_val = float(row.get("gap_diff", actual_val - budget_val) or 0.0)
+            labels.append(label or "")
+            actual_values.append(actual_val)
+            budget_values.append(budget_val)
+            gap_values.append(gap_val)
+
+        if not labels:
+            QToolTip.hideText()
+            self.chart_figure.subplots_adjust(left=0.1, right=0.9, top=0.85, bottom=0.25)
+            ax.axis("off")
+            ax.text(
+                0.5,
+                0.5,
+                "Nessun dato disponibile",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="#4b5563",
+            )
+            self.chart_canvas.draw_idle()
+            return
+
+        xs = list(range(len(labels)))
+        bar_width = 0.36
+        actual_x = [x - bar_width / 2 for x in xs]
+        budget_x = [x + bar_width / 2 for x in xs]
+        ax.bar(
+            actual_x,
+            actual_values,
+            width=bar_width,
+            color="#c4b5fd",
+            alpha=0.85,
+            label="Reale mensile",
+            zorder=2,
+        )
+        ax.bar(
+            budget_x,
+            budget_values,
+            width=bar_width,
+            color="#7a1f3d",
+            alpha=0.85,
+            label="Budget mensile",
+            zorder=2,
+        )
+        ax.plot(
+            xs,
+            gap_values,
+            color="#16a34a",
+            marker="D",
+            linewidth=1.4,
+            markersize=3.2,
+            label="Diff cumulativa",
+            zorder=3,
+        )
+        ax.fill_between(
+            xs,
+            0,
+            gap_values,
+            where=[v >= 0 for v in gap_values],
+            color="#86efac",
+            alpha=0.35,
+            zorder=1,
+        )
+        ax.fill_between(
+            xs,
+            0,
+            gap_values,
+            where=[v < 0 for v in gap_values],
+            color="#fca5a5",
+            alpha=0.35,
+            zorder=1,
+        )
+        ax.set_xticks(xs)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#1f2937")
+        ax.tick_params(axis="y", labelsize=8, colors="#1f2937")
+        ax.set_title("Andamento mensile reale/budget e diff cumulativa", fontsize=10, color="#1f2937", pad=8)
+        ax.set_ylabel("Valore", fontsize=8, color="#1f2937")
+        ax.grid(axis="y", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        ax.margins(x=0.05, y=0.2)
+        ax.legend(loc="upper left", fontsize=8, frameon=False)
+        self.chart_figure.subplots_adjust(left=0.12, right=0.97, top=0.88, bottom=0.32)
+        self._chart_hover_payload = {
+            "axes": ax,
+            "xs": xs,
+            "labels": labels,
+            "series": [
+                ("Reale mensile", actual_values),
+                ("Budget mensile", budget_values),
+                ("Diff cumulativa", gap_values),
+            ],
+        }
+        if self._chart_hover_cid is None:
+            self._chart_hover_cid = self.chart_canvas.mpl_connect("motion_notify_event", self._on_chart_hover)
+        self.chart_canvas.draw_idle()
+
+    def _on_chart_hover(self, event):
+        payload = getattr(self, "_chart_hover_payload", None)
+        if not payload:
+            if self._chart_hover_last_index is not None:
+                QToolTip.hideText()
+                self._chart_hover_last_index = None
+            return
+        if event.inaxes != payload["axes"] or event.xdata is None:
+            if self._chart_hover_last_index is not None:
+                QToolTip.hideText()
+                self._chart_hover_last_index = None
+            return
+        xs = payload["xs"]
+        if not xs:
+            return
+        x_value = event.xdata
+        nearest_idx = int(round(x_value))
+        if nearest_idx < 0 or nearest_idx >= len(xs) or abs(x_value - xs[nearest_idx]) > 0.3:
+            if self._chart_hover_last_index is not None:
+                QToolTip.hideText()
+                self._chart_hover_last_index = None
+            return
+        if nearest_idx == self._chart_hover_last_index:
+            return
+        labels = payload["labels"]
+        text_lines = [labels[nearest_idx]]
+        for series_label, series_values in payload["series"]:
+            try:
+                value = series_values[nearest_idx]
+            except IndexError:
+                value = 0.0
+            text_lines.append(f"{series_label}: {format_diff_value(value)}")
+        QToolTip.showText(QCursor.pos(), "\n".join(text_lines), self.chart_canvas)
+        self._chart_hover_last_index = nearest_idx
+
+
 class BudgetApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -766,9 +1073,10 @@ class BudgetApp(QWidget):
         control_layout.addWidget(self.select_db_btn)
 
         self.db_label = QLabel()
-        self.db_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.db_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.db_label.setMaximumWidth(260)
         self.db_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        control_layout.addWidget(self.db_label, stretch=1)
+        control_layout.addWidget(self.db_label)
 
         year_label = QLabel("Year:")
         control_layout.addWidget(year_label)
@@ -777,6 +1085,18 @@ class BudgetApp(QWidget):
         self.year_cb.currentTextChanged.connect(self._on_year_changed)
         control_layout.addWidget(self.year_cb)
         initial_year = self._populate_year_combobox()
+
+        partial_budget_label = QLabel("Diff fino a:")
+        control_layout.addWidget(partial_budget_label)
+        self.partial_budget_cb = QComboBox()
+        self.partial_budget_cb.setMinimumWidth(120)
+        self.partial_budget_cb.currentIndexChanged.connect(self._on_partial_budget_month_changed)
+        control_layout.addWidget(self.partial_budget_cb)
+
+        self.all_diff_btn = QPushButton("Dettaglio diff")
+        self.all_diff_btn.setMinimumWidth(120)
+        self.all_diff_btn.clicked.connect(self._open_all_categories_diff)
+        control_layout.addWidget(self.all_diff_btn)
 
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setMinimumWidth(100)
@@ -847,6 +1167,7 @@ class BudgetApp(QWidget):
         self.current_headers: list[str] = []
         self.category_label_items: dict[Any, QStandardItem] = {}
         self.category_totals: dict[int, dict[str, float]] = {}
+        self._partial_budget_month_columns: list[int] = []
         self.apply_light_theme()
         self._db_label_fulltext = ""
         self._set_db_path_label(config.DB_PATH)
@@ -915,6 +1236,48 @@ class BudgetApp(QWidget):
             self.year_cb.setCurrentIndex(-1)
         self.year_cb.blockSignals(False)
         return selected
+
+    def _update_partial_budget_months(self, header_names: list[str] | None = None):
+        if not hasattr(self, "partial_budget_cb"):
+            return
+        header_names = header_names or self.current_headers or []
+        month_columns = []
+        month_labels = []
+        for col, name in enumerate(header_names):
+            if col <= 1:
+                continue
+            if name == "Period":
+                continue
+            if str(name).upper() == "TOTAL":
+                continue
+            month_columns.append(col)
+            month_labels.append(str(name))
+        self._partial_budget_month_columns = month_columns
+
+        current_text = self.partial_budget_cb.currentText()
+        self.partial_budget_cb.blockSignals(True)
+        self.partial_budget_cb.clear()
+        if month_labels:
+            self.partial_budget_cb.addItems(month_labels)
+            selected_index = -1
+            if current_text in month_labels:
+                selected_index = month_labels.index(current_text)
+            else:
+                now = datetime.now()
+                current_month = ITALIAN_MONTH_NAMES.get(f"{now.month:02d}")
+                if current_month in month_labels:
+                    selected_index = month_labels.index(current_month)
+                else:
+                    selected_index = len(month_labels) - 1
+            self.partial_budget_cb.setCurrentIndex(selected_index)
+        else:
+            self.partial_budget_cb.setCurrentIndex(-1)
+        self.partial_budget_cb.blockSignals(False)
+
+    def _on_partial_budget_month_changed(self, index: int):
+        if index < 0:
+            return
+        self.update_summary_chart()
 
     def _load_data_for_current_db(self, show_errors: bool = True) -> bool:
         self._pending_db_error = None
@@ -1368,6 +1731,59 @@ class BudgetApp(QWidget):
         )
         dialog.exec()
 
+    def _open_all_categories_diff(self):
+        dialog = AllCategoriesDiffDialog(
+            self,
+            self.year_cb.currentText() if hasattr(self, "year_cb") else "",
+            self._all_categories_diff_rows,
+        )
+        dialog.exec()
+
+    def _all_categories_diff_rows(self) -> list[dict[str, Any]]:
+        header_names = self.current_headers or []
+        if not header_names:
+            return []
+        totals = self._compute_summary_totals(header_names)
+        detail_rows: list[dict[str, Any]] = []
+        added_separator = False
+        running_actual = 0.0
+        running_budget = 0.0
+        running_diff = 0.0
+        column_count = min(self.model.columnCount(), len(header_names))
+        for col in range(1, column_count):
+            header_label = header_names[col]
+            if header_label == "Period" or col == 1:
+                continue
+            is_total = str(header_label).upper() == "TOTAL"
+            if is_total and not added_separator and detail_rows:
+                detail_rows.append({"row_role": "separator"})
+                added_separator = True
+            col_totals = totals.get(col, {})
+            actual_val = col_totals.get("actual", 0.0)
+            budget_val = col_totals.get("budget", 0.0)
+            diff_val = actual_val - budget_val
+            if is_total and detail_rows:
+                actual_display = running_actual
+                budget_display = running_budget
+                diff_display = running_diff
+            else:
+                running_actual += actual_val
+                running_budget += budget_val
+                running_diff += diff_val
+                actual_display = actual_val
+                budget_display = budget_val
+                diff_display = running_diff
+            detail_rows.append(
+                {
+                    "label": "Totale" if is_total else header_label,
+                    "actual_diff": actual_display,
+                    "budget_diff": budget_display,
+                    "gap_diff": diff_display,
+                    "row_role": "total" if is_total else "month",
+                }
+            )
+        return detail_rows
+
     def _copy_budget_from_detail(self, model_index: QModelIndex):
         if not model_index or not model_index.isValid():
             return
@@ -1498,6 +1914,7 @@ class BudgetApp(QWidget):
                 header_ids.append(bid)
         header_names.append("TOTAL")
         self.current_headers = header_names[:]
+        self._update_partial_budget_months(header_names)
 
         self.model.clear()
         self.summary_header.set_summary({})
@@ -1726,10 +2143,17 @@ class BudgetApp(QWidget):
         budget_income = totals["budget_income"]
         budget_expense = totals["budget_expense"]  # negative
 
+        partial_actual_diff, partial_budget_diff, partial_gap_diff, partial_label = self._compute_partial_diff_values()
+
         actual_bars = [
             ("Entrate", actual_income, "#2c7a7b"),
             ("Uscite", abs(actual_expense), "#dd3b50"),
             ("Differenza", actual_income + actual_expense, "#3358c4"),
+        ]
+        diff_bars = [
+            ("Reale", partial_actual_diff, "#3358c4"),
+            ("Budget", partial_budget_diff, "#7a7cff"),
+            ("Diff", partial_gap_diff, "#f59e0b"),
         ]
         budget_bars = [
             ("Entrate", budget_income, "#5bc8b2"),
@@ -1737,17 +2161,18 @@ class BudgetApp(QWidget):
             ("Differenza", budget_income + budget_expense, "#7a7cff"),
         ]
 
-        magnitude_values = [abs(v) for _, v, _ in actual_bars + budget_bars]
+        magnitude_values = [abs(v) for _, v, _ in actual_bars + diff_bars + budget_bars]
         max_limit = max(magnitude_values or [1.0]) or 1.0
         offset = max_limit * 0.035
 
         self.figure.clear()
         self.figure.set_facecolor("#f6f7fb")
-        grid = self.figure.add_gridspec(1, 3, width_ratios=[1, 0.12, 1])
+        grid = self.figure.add_gridspec(1, 5, width_ratios=[1, 0.08, 1, 0.08, 1])
         ax_actual = self.figure.add_subplot(grid[0, 0])
         ax_budget = self.figure.add_subplot(grid[0, 2])
+        ax_diff = self.figure.add_subplot(grid[0, 4])
 
-        def render_panel(ax, title, items):
+        def render_panel(ax, title, items, *, show_y_labels: bool):
             labels = [lbl for lbl, _, _ in items]
             values = [val for _, val, _ in items]
             colors = [clr for _, _, clr in items]
@@ -1764,6 +2189,8 @@ class BudgetApp(QWidget):
             )
             ax.set_yticks(list(y_pos))
             ax.set_yticklabels(labels, fontsize=9, color="#1f2933")
+            if not show_y_labels:
+                ax.tick_params(axis="y", labelleft=False, length=0)
             ax.invert_yaxis()
             ax.tick_params(axis="y", length=0)
             ax.tick_params(axis="x", colors="#6b7280", labelsize=8, pad=2)
@@ -1843,6 +2270,7 @@ class BudgetApp(QWidget):
                     fontsize=9,
                     fontweight="bold",
                     color=color,
+                    clip_on=True,
                 )
             ax.margins(y=0.28)
             ax.text(
@@ -1853,13 +2281,66 @@ class BudgetApp(QWidget):
                 color="#4b5563",
                 ha="right",
                 va="top",
+                clip_on=True,
             )
 
-        render_panel(ax_actual, "Actual", actual_bars)
-        render_panel(ax_budget, "Budget", budget_bars)
+        diff_title = f"Diff fino a {partial_label}" if partial_label else "Diff parziale"
+        render_panel(ax_actual, "Actual", actual_bars, show_y_labels=True)
+        render_panel(ax_budget, "Budget", budget_bars, show_y_labels=False)
+        render_panel(ax_diff, diff_title, diff_bars, show_y_labels=True)
 
-        self.figure.subplots_adjust(left=0.12, right=0.88, top=0.88, bottom=0.24, wspace=0.0)
+        self.figure.subplots_adjust(left=0.08, right=0.92, top=0.88, bottom=0.24, wspace=0.0)
         self.canvas.draw_idle()
+
+    def _compute_partial_diff_values(self) -> tuple[float, float, float, str]:
+        month_columns = list(getattr(self, "_partial_budget_month_columns", []))
+        if not month_columns or not hasattr(self, "partial_budget_cb"):
+            return 0.0, 0.0, 0.0, ""
+        idx = self.partial_budget_cb.currentIndex()
+        if idx < 0:
+            idx = len(month_columns) - 1
+        if idx < 0:
+            return 0.0, 0.0, 0.0, ""
+        idx = min(idx, len(month_columns) - 1)
+        label = self.partial_budget_cb.itemText(idx) if idx >= 0 else ""
+        target_columns = month_columns[: idx + 1]
+
+        def _parse_amount(text: str | None) -> float:
+            raw = (text or "").replace(" ", "").replace(",", "")
+            try:
+                return float(raw) if raw else 0.0
+            except ValueError:
+                return 0.0
+
+        total_actual = 0.0
+        total_budget = 0.0
+        for cid in self.category_totals.keys():
+            item = self.category_label_items.get(cid)
+            if not item:
+                continue
+            budget_row_idx = None
+            actual_row_idx = None
+            for rr in range(item.rowCount()):
+                label_item = item.child(rr, 0)
+                if not label_item:
+                    continue
+                label_text = label_item.text()
+                if label_text == "Budget":
+                    budget_row_idx = rr
+                elif label_text == "Actual":
+                    actual_row_idx = rr
+            if actual_row_idx is not None:
+                for col in target_columns:
+                    cell = item.child(actual_row_idx, col)
+                    if cell:
+                        total_actual += _parse_amount(cell.text())
+            if budget_row_idx is not None:
+                for col in target_columns:
+                    cell = item.child(budget_row_idx, col)
+                    if cell:
+                        total_budget += _parse_amount(cell.text())
+        total_gap = total_actual - total_budget
+        return total_actual, total_budget, total_gap, label
 
     def recalc_category(self, cid: int):
         # guard to avoid treating auto-calculated cells as user edits
