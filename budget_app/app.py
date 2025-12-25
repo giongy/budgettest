@@ -242,8 +242,8 @@ class CategoryDetailDialog(QDialog):
 
         layout.addLayout(header_layout)
         layout.addSpacing(12)
-        self.table = QTableWidget(0, 5, self)
-        self.table.setHorizontalHeaderLabels(["Periodo", "Actual", "Budget", "Diff", ""])
+        self.table = QTableWidget(0, 6, self)
+        self.table.setHorizontalHeaderLabels(["Periodo", "Actual", "Budget", "Diff", "Diff cumulativa", ""])
         self.table.setFont(popup_font)
         self.table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
@@ -266,7 +266,8 @@ class CategoryDetailDialog(QDialog):
         header.resizeSection(1, 120)
         header.resizeSection(2, 110)
         header.resizeSection(3, 120)
-        header.resizeSection(4, 45)
+        header.resizeSection(4, 130)
+        header.resizeSection(5, 45)
         layout.addSpacing(6)
         layout.addWidget(self.table, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addSpacing(12)
@@ -313,6 +314,7 @@ class CategoryDetailDialog(QDialog):
         self.table.setRowCount(len(rows))
         self._bulk_budget_indexes = []
         self._bulk_month_entries = []
+        running_diff = 0.0
         for row_idx, row in enumerate(rows):
             row_role = row.get("row_role", "month")
             row_label = (row.get("label", "") or "").strip()
@@ -345,6 +347,13 @@ class CategoryDetailDialog(QDialog):
             actual_item.setFont(self._item_font)
             self.table.setItem(row_idx, 1, actual_item)
 
+            actual_value = row.get("actual_value")
+            if actual_value is None:
+                try:
+                    actual_value = float(str(row.get("actual_text", "0")).replace(" ", "").replace(",", ""))
+                except Exception:
+                    actual_value = 0.0
+
             budget_item = QTableWidgetItem(row.get("budget_text", "0"))
             budget_color = row.get("budget_color")
             if budget_color:
@@ -358,6 +367,14 @@ class CategoryDetailDialog(QDialog):
             budget_item.setFont(self._item_font)
             self.table.setItem(row_idx, 2, budget_item)
 
+            budget_value = row.get("budget_value")
+            if budget_value is None:
+                try:
+                    budget_value = float(str(row.get("budget_text", "0")).replace(" ", "").replace(",", ""))
+                except Exception:
+                    budget_value = 0.0
+            computed_diff = float(actual_value or 0.0) - float(budget_value or 0.0)
+
             diff_item = QTableWidgetItem(row.get("diff_text", "0"))
             diff_bg = row.get("diff_background")
             if diff_bg:
@@ -365,6 +382,20 @@ class CategoryDetailDialog(QDialog):
             diff_item.setFlags(diff_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             diff_item.setFont(self._item_font)
             self.table.setItem(row_idx, 3, diff_item)
+
+            if row_role == "month":
+                running_diff += computed_diff
+                cumulative_value = running_diff
+            elif abs(running_diff) < 1e-8 and abs(computed_diff) > 1e-8:
+                cumulative_value = computed_diff
+            else:
+                cumulative_value = running_diff
+            cumulative_item = QTableWidgetItem(format_diff_value(cumulative_value))
+            cumulative_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            cumulative_item.setFlags(cumulative_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            cumulative_item.setBackground(diff_background(cumulative_value))
+            cumulative_item.setFont(self._item_font)
+            self.table.setItem(row_idx, 4, cumulative_item)
 
             index = row.get("budget_index")
             if index and index.isValid():
@@ -375,7 +406,7 @@ class CategoryDetailDialog(QDialog):
                 btn.setFont(self._item_font)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(lambda checked=False, idx=index: self._copy_and_refresh(idx))
-                self.table.setCellWidget(row_idx, 4, btn)
+                self.table.setCellWidget(row_idx, 5, btn)
                 if row_role == "month":
                     self._bulk_budget_indexes.append(index)
                     month_num = MONTH_NAME_TO_NUMBER.get(row_label)
@@ -388,10 +419,10 @@ class CategoryDetailDialog(QDialog):
                         self._bulk_month_entries.append((month_num, index))
             else:
                 dummy = QWidget(self.table)
-                self.table.setCellWidget(row_idx, 4, dummy)
+                self.table.setCellWidget(row_idx, 5, dummy)
 
             if row_role == "total":
-                for col in range(0, 5):
+                for col in range(0, self.table.columnCount() - 1):
                     item = self.table.item(row_idx, col)
                     if item is not None:
                         font = item.font()
@@ -401,7 +432,7 @@ class CategoryDetailDialog(QDialog):
         self._update_chart(rows)
 
         self.table.resizeRowsToContents()
-        width_targets = {0: 150, 1: 120, 2: 110, 3: 120, 4: 45}
+        width_targets = {0: 150, 1: 120, 2: 110, 3: 120, 4: 130, 5: 45}
         for col, target in width_targets.items():
             if col < self.table.columnCount():
                 self.table.setColumnWidth(col, target)
@@ -449,6 +480,7 @@ class CategoryDetailDialog(QDialog):
             return
         QToolTip.hideText()
         self.chart_figure.clear()
+        self.chart_figure.set_facecolor("#f8fafc")
         ax = self.chart_figure.add_subplot(111)
         ax.set_facecolor("#ffffff")
         self._chart_hover_payload = None
@@ -521,29 +553,40 @@ class CategoryDetailDialog(QDialog):
         ax.plot(
             xs,
             actual_cumulative,
-            color="#2c7a7b",
+            color="#14b8a6",
             marker="o",
-            linewidth=1.2,
-            markersize=4,
+            linewidth=2.0,
+            markersize=5,
+            markerfacecolor="#ffffff",
+            markeredgewidth=1.4,
+            markeredgecolor="#14b8a6",
             label="Actual cumulativo",
         )
         ax.plot(
             xs,
             budget_cumulative,
-            color="#2563eb",
+            color="#3b82f6",
             marker="s",
-            linewidth=1.2,
-            markersize=3.5,
+            linewidth=2.0,
+            markersize=4.5,
+            markerfacecolor="#ffffff",
+            markeredgewidth=1.4,
+            markeredgecolor="#3b82f6",
             label="Budget cumulativo",
         )
         ax.set_xticks(xs)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#1f2937")
-        ax.tick_params(axis="y", labelsize=8, colors="#1f2937")
-        ax.set_title("Andamento cumulativo actual vs budget", fontsize=10, color="#1f2937", pad=8)
-        ax.set_ylabel("Importo cumulativo", fontsize=8, color="#1f2937")
-        ax.grid(axis="y", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#475569")
+        ax.tick_params(axis="y", labelsize=8, colors="#475569")
+        ax.set_title("Andamento cumulativo actual vs budget", fontsize=10, color="#111827", pad=8)
+        ax.set_ylabel("Importo cumulativo", fontsize=8, color="#475569")
+        ax.grid(axis="y", color="#e2e8f0", linestyle="-", linewidth=0.8, alpha=0.9)
+        ax.set_axisbelow(True)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
+        ax.spines["bottom"].set_color("#e2e8f0")
+        ax.spines["left"].set_color("#e2e8f0")
+        ax.spines["bottom"].set_linewidth(1.0)
+        ax.spines["left"].set_linewidth(1.0)
         ax.margins(x=0.05, y=0.2)
         ax.legend(loc="upper left", fontsize=8, frameon=False)
         self.chart_figure.subplots_adjust(left=0.12, right=0.97, top=0.88, bottom=0.32)
@@ -875,6 +918,7 @@ class AllCategoriesDiffDialog(QDialog):
             return
         QToolTip.hideText()
         self.chart_figure.clear()
+        self.chart_figure.set_facecolor("#f8fafc")
         ax = self.chart_figure.add_subplot(111)
         ax.set_facecolor("#ffffff")
         self._chart_hover_payload = None
@@ -920,8 +964,9 @@ class AllCategoriesDiffDialog(QDialog):
             actual_x,
             actual_values,
             width=bar_width,
-            color="#c4b5fd",
-            alpha=0.85,
+            color="#93c5fd",
+            alpha=0.9,
+            edgecolor="none",
             label="Reale mensile",
             zorder=2,
         )
@@ -929,18 +974,22 @@ class AllCategoriesDiffDialog(QDialog):
             budget_x,
             budget_values,
             width=bar_width,
-            color="#7a1f3d",
-            alpha=0.85,
+            color="#f9a8d4",
+            alpha=0.9,
+            edgecolor="none",
             label="Budget mensile",
             zorder=2,
         )
         ax.plot(
             xs,
             gap_values,
-            color="#16a34a",
-            marker="D",
-            linewidth=1.4,
-            markersize=3.2,
+            color="#22c55e",
+            marker="o",
+            linewidth=2.0,
+            markersize=4.5,
+            markerfacecolor="#ffffff",
+            markeredgewidth=1.4,
+            markeredgecolor="#22c55e",
             label="Diff cumulativa",
             zorder=3,
         )
@@ -963,13 +1012,19 @@ class AllCategoriesDiffDialog(QDialog):
             zorder=1,
         )
         ax.set_xticks(xs)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#1f2937")
-        ax.tick_params(axis="y", labelsize=8, colors="#1f2937")
-        ax.set_title("Andamento mensile reale/budget e diff cumulativa", fontsize=10, color="#1f2937", pad=8)
-        ax.set_ylabel("Valore", fontsize=8, color="#1f2937")
-        ax.grid(axis="y", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#475569")
+        ax.tick_params(axis="y", labelsize=8, colors="#475569")
+        ax.set_title("Andamento mensile reale/budget e diff cumulativa", fontsize=10, color="#111827", pad=8)
+        ax.set_ylabel("Valore", fontsize=8, color="#475569")
+        ax.axhline(0, color="#cbd5e1", linewidth=1.0, alpha=0.8, zorder=1)
+        ax.grid(axis="y", color="#e2e8f0", linestyle="-", linewidth=0.8, alpha=0.9)
+        ax.set_axisbelow(True)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
+        ax.spines["bottom"].set_color("#e2e8f0")
+        ax.spines["left"].set_color("#e2e8f0")
+        ax.spines["bottom"].set_linewidth(1.0)
+        ax.spines["left"].set_linewidth(1.0)
         ax.margins(x=0.05, y=0.2)
         ax.legend(loc="upper left", fontsize=8, frameon=False)
         self.chart_figure.subplots_adjust(left=0.12, right=0.97, top=0.88, bottom=0.32)
@@ -2179,19 +2234,19 @@ class BudgetApp(QWidget):
         partial_actual_diff, partial_budget_diff, partial_gap_diff, partial_label = self._compute_partial_diff_values()
 
         actual_bars = [
-            ("Entrate", actual_income, "#2c7a7b"),
-            ("Uscite", abs(actual_expense), "#dd3b50"),
-            ("Differenza", actual_income + actual_expense, "#3358c4"),
+            ("Entrate", actual_income, "#0ea5a4"),
+            ("Uscite", abs(actual_expense), "#f87171"),
+            ("Differenza", actual_income + actual_expense, "#2563eb"),
         ]
         diff_bars = [
-            ("Reale", partial_actual_diff, "#3358c4"),
-            ("Budget", partial_budget_diff, "#7a7cff"),
+            ("Reale", partial_actual_diff, "#38bdf8"),
+            ("Budget", partial_budget_diff, "#22c55e"),
             ("Diff", partial_gap_diff, "#f59e0b"),
         ]
         budget_bars = [
-            ("Entrate", budget_income, "#5bc8b2"),
-            ("Uscite", abs(budget_expense), "#ff8a80"),
-            ("Differenza", budget_income + budget_expense, "#7a7cff"),
+            ("Entrate", budget_income, "#10b981"),
+            ("Uscite", abs(budget_expense), "#fb7185"),
+            ("Differenza", budget_income + budget_expense, "#0f766e"),
         ]
 
         magnitude_values = [abs(v) for _, v, _ in actual_bars + diff_bars + budget_bars]
@@ -2199,7 +2254,7 @@ class BudgetApp(QWidget):
         offset = max_limit * 0.035
 
         self.figure.clear()
-        self.figure.set_facecolor("#f6f7fb")
+        self.figure.set_facecolor("#f8fafc")
         grid = self.figure.add_gridspec(1, 5, width_ratios=[1, 0.08, 1, 0.08, 1])
         ax_actual = self.figure.add_subplot(grid[0, 0])
         ax_budget = self.figure.add_subplot(grid[0, 2])
@@ -2217,21 +2272,22 @@ class BudgetApp(QWidget):
                 values,
                 height=0.90,
                 color=colors,
-                edgecolor="#0e0f0f",
-                linewidth=0.6,
+                alpha=0.9,
+                edgecolor="none",
+                linewidth=0.0,
             )
             ax.set_yticks(list(y_pos))
-            ax.set_yticklabels(labels, fontsize=9, color="#1f2933")
+            ax.set_yticklabels(labels, fontsize=9, color="#111827")
             if not show_y_labels:
                 ax.tick_params(axis="y", labelleft=False, length=0)
             ax.invert_yaxis()
             ax.tick_params(axis="y", length=0)
-            ax.tick_params(axis="x", colors="#6b7280", labelsize=8, pad=2)
-            ax.set_title(title, fontsize=10, fontweight="bold", color="#1f2937", pad=6)
+            ax.tick_params(axis="x", colors="#64748b", labelsize=8, pad=2)
+            ax.set_title(title, fontsize=10, fontweight="bold", color="#111827", pad=6)
 
-            ax.grid(axis="x", color="#e5e7eb", linestyle="--", linewidth=0.8, alpha=0.7)
+            ax.grid(axis="x", color="#e2e8f0", linestyle="-", linewidth=0.8, alpha=0.9)
             ax.set_axisbelow(True)
-            ax.axvline(0, color="#94a3b8", linewidth=1.0, alpha=0.8)
+            ax.axvline(0, color="#cbd5e1", linewidth=1.0, alpha=0.9)
 
             limit = max_limit * 1.18
             ax.set_xlim(-limit, limit)
