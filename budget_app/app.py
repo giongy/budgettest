@@ -1079,22 +1079,45 @@ class BudgetApp(QWidget):
         control_layout.addWidget(self.db_label)
 
         year_label = QLabel("Year:")
+        year_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        year_label.setFixedWidth(70)
+        year_label.setStyleSheet(
+            "background-color: #e8f5e9; color: #0b2e0b; border: 1px solid #c8e6c9; border-radius: 3px; padding: 1px 4px;"
+        )
         control_layout.addWidget(year_label)
         self.year_cb = QComboBox()
         self.year_cb.setMinimumWidth(110)
+        self.year_cb.setStyleSheet(
+            "QComboBox { background-color: #c8e6c9; border: 1px solid #2e7d32; border-radius: 4px; padding: 2px 6px; } "
+            "QComboBox QAbstractItemView::item:selected { background-color: #81c784; color: #0b2e0b; }"
+        )
         self.year_cb.currentTextChanged.connect(self._on_year_changed)
         control_layout.addWidget(self.year_cb)
         initial_year = self._populate_year_combobox()
 
-        partial_budget_label = QLabel("Diff fino a:")
+        partial_budget_label = QLabel("Diff fino:")
+        partial_budget_label.setStyleSheet(
+            "background-color: #e3f2fd; color: #0b4f6c; border: 1px solid #b3e5fc; border-radius: 3px; padding: 1px 4px;"
+        )
+        partial_budget_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        partial_budget_label.setFixedWidth(70)
         control_layout.addWidget(partial_budget_label)
         self.partial_budget_cb = QComboBox()
-        self.partial_budget_cb.setMinimumWidth(120)
+        self.partial_budget_cb.setFixedWidth(105)
+        self.partial_budget_cb.setStyleSheet(
+            "QComboBox { background-color: #e3f2fd; border: 1px solid #90caf9; border-radius: 4px; padding: 2px 6px; } "
+            "QComboBox QAbstractItemView { selection-background-color: #bbdefb; selection-color: #0d47a1; }"
+        )
         self.partial_budget_cb.currentIndexChanged.connect(self._on_partial_budget_month_changed)
         control_layout.addWidget(self.partial_budget_cb)
 
         self.all_diff_btn = QPushButton("Dettaglio diff")
         self.all_diff_btn.setMinimumWidth(120)
+        self.all_diff_btn.setStyleSheet(
+            "QPushButton { background-color: #b3e5fc; border: 1px solid #4fc3f7; color: #014f7a; font-weight: bold; } "
+            "QPushButton:hover { background-color: #81d4fa; } "
+            "QPushButton:pressed { background-color: #4fc3f7; }"
+        )
         self.all_diff_btn.clicked.connect(self._open_all_categories_diff)
         control_layout.addWidget(self.all_diff_btn)
 
@@ -1110,15 +1133,6 @@ class BudgetApp(QWidget):
         control_layout.addWidget(self.save_btn)
 
         # Expand/Collapse all main categories
-        self.expand_all_btn = QToolButton()
-        self.expand_all_btn.setAutoRaise(True)
-        self.expand_all_btn.setToolTip("Expand all categories")
-        self.expand_all_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.expand_all_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarUnshadeButton))
-        self.expand_all_btn.setIconSize(QSize(14, 14))
-        self.expand_all_btn.setFixedSize(QSize(22, 22))
-        self.expand_all_btn.clicked.connect(self.expand_all_main)
-        control_layout.addWidget(self.expand_all_btn)
         self.collapse_all_btn = QToolButton()
         self.collapse_all_btn.setAutoRaise(True)
         self.collapse_all_btn.setToolTip("Collapse all categories")
@@ -1126,8 +1140,27 @@ class BudgetApp(QWidget):
         self.collapse_all_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarShadeButton))
         self.collapse_all_btn.setIconSize(QSize(14, 14))
         self.collapse_all_btn.setFixedSize(QSize(22, 22))
+        self.collapse_all_btn.setStyleSheet(
+            "QToolButton { background-color: #a0626f; border: 1px solid #7a4450; border-radius: 4px; } "
+            "QToolButton:hover { background-color: #b27480; } "
+            "QToolButton:pressed { background-color: #7a4450; }"
+        )
         self.collapse_all_btn.clicked.connect(self.collapse_all_main)
         control_layout.addWidget(self.collapse_all_btn)
+        self.expand_all_btn = QToolButton()
+        self.expand_all_btn.setAutoRaise(True)
+        self.expand_all_btn.setToolTip("Expand all categories")
+        self.expand_all_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.expand_all_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarUnshadeButton))
+        self.expand_all_btn.setIconSize(QSize(14, 14))
+        self.expand_all_btn.setFixedSize(QSize(22, 22))
+        self.expand_all_btn.setStyleSheet(
+            "QToolButton { background-color: #a0626f; border: 1px solid #7a4450; border-radius: 4px; } "
+            "QToolButton:hover { background-color: #b27480; } "
+            "QToolButton:pressed { background-color: #7a4450; }"
+        )
+        self.expand_all_btn.clicked.connect(self.expand_all_main)
+        control_layout.addWidget(self.expand_all_btn)
 
         layout.addWidget(self.control_frame)
 
