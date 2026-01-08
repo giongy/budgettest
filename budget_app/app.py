@@ -243,7 +243,7 @@ class CategoryDetailDialog(QDialog):
         layout.addLayout(header_layout)
         layout.addSpacing(12)
         self.table = QTableWidget(0, 6, self)
-        self.table.setHorizontalHeaderLabels(["Periodo", "Actual", "Budget", "Diff", "Diff cumulativa", ""])
+        self.table.setHorizontalHeaderLabels(["Periodo", "Reale", "Budget", "Diff", "Diff cumulativa", ""])
         self.table.setFont(popup_font)
         self.table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
@@ -402,7 +402,7 @@ class CategoryDetailDialog(QDialog):
                 btn = QToolButton(self.table)
                 btn.setIcon(self.copy_icon)
                 btn.setAutoRaise(True)
-                btn.setToolTip("Imposta il budget uguale all'actual")
+                btn.setToolTip("Imposta il budget uguale al reale")
                 btn.setFont(self._item_font)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(lambda checked=False, idx=index: self._copy_and_refresh(idx))
@@ -560,7 +560,7 @@ class CategoryDetailDialog(QDialog):
             markerfacecolor="#ffffff",
             markeredgewidth=1.4,
             markeredgecolor="#14b8a6",
-            label="Actual cumulativo",
+            label="Reale cumulativo",
         )
         ax.plot(
             xs,
@@ -577,7 +577,7 @@ class CategoryDetailDialog(QDialog):
         ax.set_xticks(xs)
         ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8, color="#475569")
         ax.tick_params(axis="y", labelsize=8, colors="#475569")
-        ax.set_title("Andamento cumulativo actual vs budget", fontsize=10, color="#111827", pad=8)
+        ax.set_title("Andamento cumulativo reale vs budget", fontsize=10, color="#111827", pad=8)
         ax.set_ylabel("Importo cumulativo", fontsize=8, color="#475569")
         ax.grid(axis="y", color="#e2e8f0", linestyle="-", linewidth=0.8, alpha=0.9)
         ax.set_axisbelow(True)
@@ -595,7 +595,7 @@ class CategoryDetailDialog(QDialog):
             "xs": xs,
             "labels": labels,
             "series": [
-                ("Actual cumulativo", actual_cumulative),
+                ("Reale cumulativo", actual_cumulative),
                 ("Budget cumulativo", budget_cumulative),
             ],
         }
@@ -1497,7 +1497,7 @@ class BudgetApp(QWidget):
                 label_text = label_item.text()
                 if label_text == "Budget":
                     budget_row_idx = rr
-                elif label_text == "Actual":
+                elif label_text == "Reale":
                     actual_row_idx = rr
             if budget_row_idx is None and actual_row_idx is None:
                 continue
@@ -1553,7 +1553,7 @@ class BudgetApp(QWidget):
             "background": QBrush(QColor("#E8EAED")),
             "alignment": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "lines": [
-                {"text": "ACTUAL", "bg": SUMMARY_ACTUAL_POSITIVE_COLOR},
+                {"text": "REALE", "bg": SUMMARY_ACTUAL_POSITIVE_COLOR},
                 {"text": "BUDGET", "bg": SUMMARY_BUDGET_POSITIVE_COLOR},
                 {"text": "DIFF", "bg": SUMMARY_DIFF_POSITIVE_COLOR},
             ],
@@ -1895,7 +1895,7 @@ class BudgetApp(QWidget):
             if not label_item:
                 continue
             label_text = label_item.text()
-            if label_text == "Actual":
+            if label_text == "Reale":
                 actual_row_idx = row
             elif label_text == "Budget":
                 budget_row_idx = row
@@ -2090,7 +2090,7 @@ class BudgetApp(QWidget):
             self.model.appendRow([cat_item])
 
             # Actual row
-            act_row = [make_item("Actual", False)]
+            act_row = [make_item("Reale", False)]
             total_act = 0.0
             year_bid = header_ids[0]
             val_year = actual_map.get((cid, year_bid), 0.0)
@@ -2374,7 +2374,7 @@ class BudgetApp(QWidget):
             )
 
         diff_title = f"Diff fino a {partial_label}" if partial_label else "Diff parziale"
-        render_panel(ax_actual, "Actual", actual_bars, show_y_labels=True)
+        render_panel(ax_actual, "Reale", actual_bars, show_y_labels=True)
         render_panel(ax_budget, "Budget", budget_bars, show_y_labels=False)
         render_panel(ax_diff, diff_title, diff_bars, show_y_labels=True)
 
@@ -2416,7 +2416,7 @@ class BudgetApp(QWidget):
                 label_text = label_item.text()
                 if label_text == "Budget":
                     budget_row_idx = rr
-                elif label_text == "Actual":
+                elif label_text == "Reale":
                     actual_row_idx = rr
             if actual_row_idx is not None:
                 for col in target_columns:
@@ -2469,7 +2469,7 @@ class BudgetApp(QWidget):
                     budget_row_idx = rr
                 elif label == "Diff":
                     diff_row_idx = rr
-                elif label == "Actual":
+                elif label == "Reale":
                     actual_row_idx = rr
             if budget_row_idx is None or diff_row_idx is None:
                 return
@@ -2608,7 +2608,7 @@ class BudgetApp(QWidget):
         if category_item:
             for row in range(category_item.rowCount()):
                 label_item = category_item.child(row, 0)
-                if label_item and label_item.text() == "Actual":
+                if label_item and label_item.text() == "Reale":
                     actual_cell = category_item.child(row, index.column())
                     if actual_cell:
                         text_val = (actual_cell.text() or "").replace(" ", "").replace(",", "")
