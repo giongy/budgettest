@@ -9,16 +9,17 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QHeaderView, QMessageBox, QFileDialog,
     QSizePolicy, QAbstractItemView, QToolButton, QStyle, QFrame,
     QDialog, QTableWidget, QTableWidgetItem, QAbstractScrollArea,
-    QToolTip,
+    QToolTip, QListView, QStyledItemDelegate, QStyleOptionViewItem,
 )
 from PyQt6.QtGui import QStandardItemModel, QColor, QFont, QBrush, QIcon, QStandardItem, QCursor
-from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize
+from PyQt6.QtCore import Qt, QTimer, QModelIndex, QSize, QEvent
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from . import config
 from .repository import (
     load_budgetyear_map,
     load_categories,
+    load_accounts,
     fetch_actuals_for_year,
     load_budgets_for_year,
     upsert_budget_entry,
@@ -172,6 +173,15 @@ def compute_budget_distribution(year_amount, year_period, month_bids, overrides)
             last = missing_bids[-1]
             values[last] += diff
     return values, total_display, over_limit, set(overrides.keys())
+
+
+class AccountItemDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.features &= ~QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
 
 class CategoryDetailDialog(QDialog):
@@ -1096,6 +1106,9 @@ class BudgetApp(QWidget):
         self.id2name: dict[int, str] = {}
         self.children_map: dict[int, list[int]] = {}
         self.root_ids: list[int] = []
+        self.accounts: list[tuple[int, str]] = []
+        self._account_id_name: dict[int, str] = {}
+        self._account_selection_guard = False
         self._pending_db_error: str | None = None
         self._should_prompt_db_dialog = False
         self._load_data_for_current_db(show_errors=False)
@@ -1118,20 +1131,24 @@ class BudgetApp(QWidget):
         self.control_frame.setStyleSheet(
             "#controlPanel { border: 2px solid #000; border-radius: 6px; background-color: #f6f7fb; }"
         )
-        control_layout = QHBoxLayout(self.control_frame)
+        control_layout = QVBoxLayout(self.control_frame)
         control_layout.setContentsMargins(10, 6, 10, 6)
-        control_layout.setSpacing(12)
+        control_layout.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(12)
 
         self.select_db_btn = QPushButton("Select DB")
         self.select_db_btn.setMinimumWidth(100)
         self.select_db_btn.clicked.connect(self.select_db)
-        control_layout.addWidget(self.select_db_btn)
+        top_row.addWidget(self.select_db_btn)
 
         self.db_label = QLabel()
         self.db_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.db_label.setMaximumWidth(260)
         self.db_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        control_layout.addWidget(self.db_label)
+        top_row.addWidget(self.db_label)
 
         year_label = QLabel("Year:")
         year_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -1139,7 +1156,7 @@ class BudgetApp(QWidget):
         year_label.setStyleSheet(
             "background-color: #e8f5e9; color: #0b2e0b; border: 1px solid #c8e6c9; border-radius: 3px; padding: 1px 4px;"
         )
-        control_layout.addWidget(year_label)
+        top_row.addWidget(year_label)
         self.year_cb = QComboBox()
         self.year_cb.setMinimumWidth(110)
         self.year_cb.setStyleSheet(
@@ -1147,7 +1164,7 @@ class BudgetApp(QWidget):
             "QComboBox QAbstractItemView::item:selected { background-color: #81c784; color: #0b2e0b; }"
         )
         self.year_cb.currentTextChanged.connect(self._on_year_changed)
-        control_layout.addWidget(self.year_cb)
+        top_row.addWidget(self.year_cb)
         initial_year = self._populate_year_combobox()
 
         partial_budget_label = QLabel("Diff fino:")
@@ -1156,7 +1173,7 @@ class BudgetApp(QWidget):
         )
         partial_budget_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         partial_budget_label.setFixedWidth(70)
-        control_layout.addWidget(partial_budget_label)
+        top_row.addWidget(partial_budget_label)
         self.partial_budget_cb = QComboBox()
         self.partial_budget_cb.setFixedWidth(105)
         self.partial_budget_cb.setStyleSheet(
@@ -1164,7 +1181,7 @@ class BudgetApp(QWidget):
             "QComboBox QAbstractItemView { selection-background-color: #bbdefb; selection-color: #0d47a1; }"
         )
         self.partial_budget_cb.currentIndexChanged.connect(self._on_partial_budget_month_changed)
-        control_layout.addWidget(self.partial_budget_cb)
+        top_row.addWidget(self.partial_budget_cb)
 
         self.all_diff_btn = QPushButton("Dettaglio diff")
         self.all_diff_btn.setMinimumWidth(120)
@@ -1174,18 +1191,18 @@ class BudgetApp(QWidget):
             "QPushButton:pressed { background-color: #4fc3f7; }"
         )
         self.all_diff_btn.clicked.connect(self._open_all_categories_diff)
-        control_layout.addWidget(self.all_diff_btn)
+        top_row.addWidget(self.all_diff_btn)
 
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setMinimumWidth(100)
         self.refresh_btn.clicked.connect(self.refresh)
-        control_layout.addWidget(self.refresh_btn)
+        top_row.addWidget(self.refresh_btn)
 
         self.save_btn = QPushButton("Save Budgets")
         self.save_btn.setMinimumWidth(120)
         self._set_unsaved_changes(False)
         self.save_btn.clicked.connect(self.save_budgets)
-        control_layout.addWidget(self.save_btn)
+        top_row.addWidget(self.save_btn)
 
         # Expand/Collapse all main categories
         self.collapse_all_btn = QToolButton()
@@ -1201,7 +1218,7 @@ class BudgetApp(QWidget):
             "QToolButton:pressed { background-color: #7a4450; }"
         )
         self.collapse_all_btn.clicked.connect(self.collapse_all_main)
-        control_layout.addWidget(self.collapse_all_btn)
+        top_row.addWidget(self.collapse_all_btn)
         self.expand_all_btn = QToolButton()
         self.expand_all_btn.setAutoRaise(True)
         self.expand_all_btn.setToolTip("Expand all categories")
@@ -1215,7 +1232,48 @@ class BudgetApp(QWidget):
             "QToolButton:pressed { background-color: #7a4450; }"
         )
         self.expand_all_btn.clicked.connect(self.expand_all_main)
-        control_layout.addWidget(self.expand_all_btn)
+        top_row.addWidget(self.expand_all_btn)
+
+        control_layout.addLayout(top_row)
+
+        accounts_row = QHBoxLayout()
+        accounts_row.setContentsMargins(0, 0, 0, 0)
+        accounts_row.setSpacing(10)
+
+        accounts_label = QLabel("Conti:")
+        accounts_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        accounts_label.setFixedWidth(70)
+        accounts_label.setStyleSheet(
+            "background-color: #fff7ed; color: #7c2d12; border: 1px solid #fed7aa; border-radius: 3px; padding: 1px 4px;"
+        )
+        accounts_row.addWidget(accounts_label)
+
+        self.accounts_cb = QComboBox()
+        self.accounts_cb.setEditable(True)
+        self.accounts_cb.setFixedWidth(200)
+        self.accounts_cb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.accounts_cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.accounts_cb.setStyleSheet(
+            "QComboBox { background-color: #ffffff; } "
+            "QComboBox QAbstractItemView { background-color: #ffffff; color: #111; } "
+            "QComboBox QAbstractItemView::item { padding: 4px 6px; } "
+            "QComboBox QAbstractItemView::indicator { width: 0px; height: 0px; border: none; background: transparent; }"
+        )
+        self.accounts_cb.lineEdit().setReadOnly(True)
+        self.accounts_cb.lineEdit().setPlaceholderText("Seleziona conti")
+        self.accounts_cb.setMaxVisibleItems(12)
+        self.accounts_cb.setModel(QStandardItemModel(self.accounts_cb))
+        accounts_view = QListView(self.accounts_cb)
+        accounts_view.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        accounts_view.setItemDelegate(AccountItemDelegate(accounts_view))
+        self.accounts_cb.setView(accounts_view)
+        self.accounts_cb.view().viewport().installEventFilter(self)
+        self.accounts_cb.view().pressed.connect(self._on_account_item_pressed)
+        self.accounts_cb.model().dataChanged.connect(self._on_account_check_changed)
+        accounts_row.addWidget(self.accounts_cb)
+        accounts_row.addStretch()
+
+        control_layout.addLayout(accounts_row)
 
         layout.addWidget(self.control_frame)
 
@@ -1259,6 +1317,7 @@ class BudgetApp(QWidget):
         self.apply_light_theme()
         self._db_label_fulltext = ""
         self._set_db_path_label(config.DB_PATH)
+        self._populate_account_selector()
         QTimer.singleShot(0, self._update_db_label_text)
         if initial_year:
             self._on_year_changed(initial_year)
@@ -1281,6 +1340,12 @@ class BudgetApp(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_db_label_text()
+
+    def eventFilter(self, obj, event):
+        if hasattr(self, "accounts_cb") and obj == self.accounts_cb.view().viewport():
+            if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
+                return True
+        return super().eventFilter(obj, event)
 
     def _set_db_path_label(self, path: Path | str | None):
         display_path = str(path) if path else "--"
@@ -1324,6 +1389,171 @@ class BudgetApp(QWidget):
             self.year_cb.setCurrentIndex(-1)
         self.year_cb.blockSignals(False)
         return selected
+
+    def _populate_account_selector(self) -> None:
+        if not hasattr(self, "accounts_cb"):
+            return
+        model = self.accounts_cb.model()
+        self._account_selection_guard = True
+        model.clear()
+        self._account_id_name = {}
+        for account_id, name in self.accounts:
+            try:
+                account_id = int(account_id)
+            except (TypeError, ValueError):
+                continue
+            display_name = str(name).strip() or f"(id:{account_id})"
+            self._account_id_name[account_id] = display_name
+            item = QStandardItem(display_name)
+            item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            item.setData(account_id, Qt.ItemDataRole.UserRole)
+            item.setCheckable(True)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self._style_account_item(item, False)
+            model.appendRow(item)
+        self._account_selection_guard = False
+        self.accounts_cb.setEnabled(bool(self.accounts))
+        self._apply_saved_account_selection()
+
+    def _apply_saved_account_selection(self) -> None:
+        if not hasattr(self, "accounts_cb"):
+            return
+        available_ids = {aid for aid, _ in self.accounts}
+        if not available_ids:
+            self._update_account_selector_text([])
+            return
+        saved_ids = set(config.load_selected_accounts())
+        selected_ids = saved_ids & available_ids
+        if not selected_ids:
+            selected_ids = set(available_ids)
+        self._set_account_checks(selected_ids)
+        self._update_account_selector_text(self._get_selected_account_ids())
+
+    def _set_account_checks(self, selected_ids: set[int]) -> None:
+        if not hasattr(self, "accounts_cb"):
+            return
+        model = self.accounts_cb.model()
+        self._account_selection_guard = True
+        for row in range(model.rowCount()):
+            item = model.item(row)
+            if not item:
+                continue
+            account_id = item.data(Qt.ItemDataRole.UserRole)
+            checked = account_id in selected_ids
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            self._style_account_item(item, checked)
+        self._account_selection_guard = False
+
+    def _get_selected_account_ids(self) -> list[int]:
+        if not hasattr(self, "accounts_cb"):
+            return []
+        model = self.accounts_cb.model()
+        selected_ids: list[int] = []
+        for row in range(model.rowCount()):
+            item = model.item(row)
+            if not item or item.checkState() != Qt.CheckState.Checked:
+                continue
+            account_id = item.data(Qt.ItemDataRole.UserRole)
+            if account_id is None:
+                continue
+            selected_ids.append(int(account_id))
+        return selected_ids
+
+    def _update_account_selector_text(self, selected_ids: list[int]) -> None:
+        if not hasattr(self, "accounts_cb"):
+            return
+        if not self.accounts:
+            text = "Nessun conto"
+            tooltip = ""
+        else:
+            total = len(self.accounts)
+            selected_names = [self._account_id_name.get(aid, str(aid)) for aid in selected_ids]
+            selected_count = len(selected_names)
+            if selected_count == 0:
+                text = "Nessun conto"
+            elif selected_count == total:
+                text = "Tutti i conti"
+            elif selected_count == 1:
+                text = selected_names[0]
+            elif selected_count <= 3:
+                text = ", ".join(selected_names)
+            else:
+                text = f"{selected_count} conti selezionati"
+            tooltip = ", ".join(selected_names) if selected_names else ""
+        if self.accounts_cb.isEditable() and self.accounts_cb.lineEdit():
+            self.accounts_cb.lineEdit().setText(text)
+        else:
+            self.accounts_cb.setCurrentText(text)
+        self.accounts_cb.setToolTip(tooltip)
+
+    def _persist_account_selection(self, selected_ids: list[int]) -> None:
+        if not self.accounts:
+            config.save_selected_accounts(None)
+            return
+        selected_set = set(selected_ids)
+        all_ids = {aid for aid, _ in self.accounts}
+        if not selected_set or selected_set == all_ids:
+            config.save_selected_accounts(None)
+        else:
+            config.save_selected_accounts(sorted(selected_set))
+
+    def _get_account_filter_ids(self) -> list[int] | None:
+        if not self.accounts:
+            return None
+        selected_ids = self._get_selected_account_ids()
+        if not selected_ids:
+            return None
+        if set(selected_ids) == {aid for aid, _ in self.accounts}:
+            return None
+        return selected_ids
+
+    def _style_account_item(self, item: QStandardItem, checked: bool) -> None:
+        if checked:
+            item.setBackground(QBrush(QColor("#fff7ed")))
+            item.setForeground(QBrush(QColor("#7c2d12")))
+        else:
+            item.setBackground(QBrush())
+            item.setForeground(QBrush())
+        font = QFont(item.font())
+        font.setBold(checked)
+        item.setFont(font)
+
+    def _on_account_item_pressed(self, index):
+        if self._account_selection_guard:
+            return
+        item = self.accounts_cb.model().itemFromIndex(index)
+        if not item:
+            return
+        new_state = (
+            Qt.CheckState.Unchecked
+            if item.checkState() == Qt.CheckState.Checked
+            else Qt.CheckState.Checked
+        )
+        item.setCheckState(new_state)
+
+    def _on_account_check_changed(self, _top_left, _bottom_right, roles):
+        if self._account_selection_guard:
+            return
+        if roles and Qt.ItemDataRole.CheckStateRole not in roles:
+            return
+        model = self.accounts_cb.model()
+        if _top_left is not None and _bottom_right is not None:
+            for row in range(_top_left.row(), _bottom_right.row() + 1):
+                item = model.item(row)
+                if not item:
+                    continue
+                self._style_account_item(item, item.checkState() == Qt.CheckState.Checked)
+        selected_ids = self._get_selected_account_ids()
+        if self.accounts and not selected_ids:
+            self._set_account_checks({aid for aid, _ in self.accounts})
+            selected_ids = self._get_selected_account_ids()
+        self._update_account_selector_text(selected_ids)
+        self._persist_account_selection(selected_ids)
+        self.refresh()
 
     def _update_partial_budget_months(self, header_names: list[str] | None = None):
         if not hasattr(self, "partial_budget_cb"):
@@ -1370,6 +1600,8 @@ class BudgetApp(QWidget):
     def _load_data_for_current_db(self, show_errors: bool = True) -> bool:
         self._pending_db_error = None
         self._should_prompt_db_dialog = False
+        self.accounts = []
+        self._account_id_name = {}
         db_path = config.DB_PATH
         if not db_path:
             message = "Nessun database configurato. Usa 'Select DB' per scegliere un file Money Manager (.mmb)."
@@ -1390,6 +1622,10 @@ class BudgetApp(QWidget):
         try:
             years, per_year_entries, name_to_id = load_budgetyear_map()
             id2name, children_map, root_ids = load_categories()
+            try:
+                accounts = load_accounts()
+            except Exception:
+                accounts = []
         except sqlite3.Error as exc:
             message = f"Errore durante la lettura del database:\n{exc}"
             if show_errors:
@@ -1412,6 +1648,7 @@ class BudgetApp(QWidget):
         self.id2name = id2name
         self.children_map = children_map
         self.root_ids = root_ids
+        self.accounts = accounts
         return True
 
     def _show_pending_db_error(self):
@@ -2038,7 +2275,8 @@ class BudgetApp(QWidget):
         if 0 <= total_col < self.model.columnCount():
             self.view.setItemDelegateForColumn(total_col, self.total_divider_delegate)
 
-        df_actual = fetch_actuals_for_year(year)
+        account_filter = self._get_account_filter_ids()
+        df_actual = fetch_actuals_for_year(year, account_filter)
         df_bud = load_budgets_for_year(year, self.name_to_id, self.per_year_entries)
         colname_to_bid = {name: bid for bid, name in entries}
 
@@ -2877,6 +3115,7 @@ class BudgetApp(QWidget):
             return
         config.save_last_db(new_path)
         self._set_db_path_label(new_path)
+        self._populate_account_selector()
         selected = self._populate_year_combobox()
         if selected:
             self._on_year_changed(selected)

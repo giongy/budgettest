@@ -105,6 +105,33 @@ def save_last_budget_year(year: str) -> None:
     _save_cfg(cfg)
 
 
+def load_selected_accounts() -> list[int]:
+    cfg = _load_cfg()
+    raw_value = cfg.get("app", "selected_accounts", fallback="") or ""
+    tokens = [token.strip() for token in raw_value.replace(";", ",").split(",")]
+    ids: list[int] = []
+    for token in tokens:
+        if not token:
+            continue
+        try:
+            ids.append(int(token))
+        except ValueError:
+            continue
+    return ids
+
+
+def save_selected_accounts(account_ids: list[int] | None) -> None:
+    cfg = _load_cfg()
+    if "app" not in cfg:
+        cfg["app"] = {}
+    if not account_ids:
+        cfg["app"].pop("selected_accounts", None)
+    else:
+        unique_ids = sorted({int(aid) for aid in account_ids})
+        cfg["app"]["selected_accounts"] = ",".join(str(aid) for aid in unique_ids)
+    _save_cfg(cfg)
+
+
 def load_style_settings() -> dict[str, Any]:
     cfg = _load_cfg()
     updated = False

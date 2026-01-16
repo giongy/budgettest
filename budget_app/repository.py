@@ -41,8 +41,38 @@ def load_categories():
     return id2name, children, roots
 
 
-def fetch_actuals_for_year(year):
-    sql = """
+def load_accounts():
+    with get_conn() as conn:
+        df = pd.read_sql_query(
+            "SELECT ACCOUNTID, ACCOUNTNAME FROM accountlist_v1 ORDER BY ACCOUNTNAME",
+            conn,
+        )
+    if df.empty:
+        return []
+    df["ACCOUNTNAME"] = df["ACCOUNTNAME"].fillna("").astype(str)
+    accounts = []
+    for _, row in df.iterrows():
+        try:
+            account_id = int(row["ACCOUNTID"])
+        except (TypeError, ValueError):
+            continue
+        name = row["ACCOUNTNAME"].strip() or f"(id:{account_id})"
+        accounts.append((account_id, name))
+    return accounts
+
+
+def fetch_actuals_for_year(year, account_ids=None):
+    account_ids = [int(aid) for aid in account_ids] if account_ids else []
+    account_filter = ""
+    split_filter = ""
+    params = []
+    if account_ids:
+        placeholders = ",".join("?" * len(account_ids))
+        split_filter = f" WHERE t1.ACCOUNTID IN ({placeholders})"
+        account_filter = f" AND ca.ACCOUNTID IN ({placeholders})"
+        params.extend(account_ids)
+        params.extend(account_ids)
+    sql = f"""
     WITH wd AS (
         SELECT t1.transdate AS date,
                CASE WHEN t1.STATUS = 'V' THEN 0
@@ -52,6 +82,7 @@ def fetch_actuals_for_year(year):
                t2.categid AS categid
         FROM splittransactions_v1 t2
         JOIN checkingaccount_v1 t1 ON t1.TRANSID = t2.TRANSID
+        {split_filter}
         UNION ALL
         SELECT ca.transdate AS date,
                CASE WHEN ca.STATUS = 'V' THEN 0
@@ -60,13 +91,14 @@ def fetch_actuals_for_year(year):
                     ELSE ca.TRANSAMOUNT END AS amount,
                ca.categid AS categid
         FROM checkingaccount_v1 ca
-        WHERE ca.categid <> -1 AND ca.transcode <> 'Transfer'
+        WHERE ca.categid <> -1 AND ca.transcode <> 'Transfer'{account_filter}
     )
     SELECT substr(date,1,7) AS month, categid, SUM(amount) AS amount
     FROM wd WHERE substr(date,1,4) = ? GROUP BY month, categid
     """
+    params.append(year)
     with get_conn() as conn:
-        df = pd.read_sql_query(sql, conn, params=[year])
+        df = pd.read_sql_query(sql, conn, params=params)
     return df if not df.empty else pd.DataFrame(columns=["month", "categid", "amount"])
 
 
