@@ -79,6 +79,10 @@ ITALIAN_MONTH_NAMES = {
 
 MONTH_NAME_TO_NUMBER = {name: int(code) for code, name in ITALIAN_MONTH_NAMES.items()}
 
+ATTN_BASE_FORE_ROLE = Qt.ItemDataRole.UserRole + 10
+ATTN_BASE_BACK_ROLE = Qt.ItemDataRole.UserRole + 11
+ATTN_DIM_ROLE = Qt.ItemDataRole.UserRole + 12
+
 
 def get_resource_path(name: str) -> Path:
     """Return resource path, compatible with PyInstaller one-file bundles."""
@@ -1109,6 +1113,7 @@ class BudgetApp(QWidget):
         self.accounts: list[tuple[int, str]] = []
         self._account_id_name: dict[int, str] = {}
         self._account_selection_guard = False
+        self._attention_filter_enabled = False
         self._pending_db_error: str | None = None
         self._should_prompt_db_dialog = False
         self._load_data_for_current_db(show_errors=False)
@@ -1135,6 +1140,22 @@ class BudgetApp(QWidget):
         control_layout.setContentsMargins(10, 6, 10, 6)
         control_layout.setSpacing(6)
 
+        def _make_v_sep():
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.NoFrame)
+            sep.setStyleSheet("background-color: #b07d8e;")
+            sep.setFixedWidth(2)
+            sep.setFixedHeight(28)
+            return sep
+
+        def _make_h_sep():
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.NoFrame)
+            sep.setStyleSheet("background-color: #b07d8e;")
+            sep.setFixedHeight(2)
+            sep.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            return sep
+
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(12)
@@ -1149,6 +1170,7 @@ class BudgetApp(QWidget):
         self.db_label.setMaximumWidth(260)
         self.db_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         top_row.addWidget(self.db_label)
+        top_row.addWidget(_make_v_sep())
 
         year_label = QLabel("Year:")
         year_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -1165,6 +1187,7 @@ class BudgetApp(QWidget):
         )
         self.year_cb.currentTextChanged.connect(self._on_year_changed)
         top_row.addWidget(self.year_cb)
+        top_row.addWidget(_make_v_sep())
         initial_year = self._populate_year_combobox()
 
         partial_budget_label = QLabel("Diff fino:")
@@ -1182,6 +1205,7 @@ class BudgetApp(QWidget):
         )
         self.partial_budget_cb.currentIndexChanged.connect(self._on_partial_budget_month_changed)
         top_row.addWidget(self.partial_budget_cb)
+        top_row.addWidget(_make_v_sep())
 
         self.all_diff_btn = QPushButton("Dettaglio diff")
         self.all_diff_btn.setMinimumWidth(120)
@@ -1203,6 +1227,7 @@ class BudgetApp(QWidget):
         self._set_unsaved_changes(False)
         self.save_btn.clicked.connect(self.save_budgets)
         top_row.addWidget(self.save_btn)
+        top_row.addWidget(_make_v_sep())
 
         # Expand/Collapse all main categories
         self.collapse_all_btn = QToolButton()
@@ -1235,6 +1260,7 @@ class BudgetApp(QWidget):
         top_row.addWidget(self.expand_all_btn)
 
         control_layout.addLayout(top_row)
+        control_layout.addWidget(_make_h_sep())
 
         accounts_row = QHBoxLayout()
         accounts_row.setContentsMargins(0, 0, 0, 0)
@@ -1271,6 +1297,21 @@ class BudgetApp(QWidget):
         self.accounts_cb.view().pressed.connect(self._on_account_item_pressed)
         self.accounts_cb.model().dataChanged.connect(self._on_account_check_changed)
         accounts_row.addWidget(self.accounts_cb)
+        accounts_row.addWidget(_make_v_sep())
+
+        self.attention_toggle = QToolButton()
+        self.attention_toggle.setCheckable(True)
+        self.attention_toggle.setText("Solo fuori budget")
+        self.attention_toggle.setToolTip(
+            "Evidenzia solo i mesi/categorie fuori budget e opacizza le altre."
+        )
+        self.attention_toggle.setStyleSheet(
+            "QToolButton { background-color: #ead0d8; border: 1px solid #c59aaa; "
+            "border-radius: 4px; padding: 2px 8px; color: #4b1f2d; } "
+            "QToolButton:checked { background-color: #b46a7b; border-color: #9f5667; color: #ffffff; }"
+        )
+        self.attention_toggle.toggled.connect(self._on_attention_toggle)
+        accounts_row.addWidget(self.attention_toggle)
         accounts_row.addStretch()
 
         control_layout.addLayout(accounts_row)
@@ -1554,6 +1595,218 @@ class BudgetApp(QWidget):
         self._update_account_selector_text(selected_ids)
         self._persist_account_selection(selected_ids)
         self.refresh()
+
+    def _on_attention_toggle(self, checked: bool):
+        self._attention_filter_enabled = bool(checked)
+        self._apply_attention_filter()
+
+    def _apply_attention_filter(self):
+        if not hasattr(self, "model"):
+            return
+        if not self._attention_filter_enabled:
+            self._restore_attention_filter()
+            return
+        root = self.model.invisibleRootItem()
+        previous_guard = self._recalc_guard
+        self._recalc_guard = True
+        try:
+            problem_roots: set[int] = set()
+            for row in range(root.rowCount()):
+                cat_item = root.child(row, 0)
+                if not cat_item:
+                    continue
+                meta = cat_item.data(Qt.ItemDataRole.UserRole)
+                if not meta or not isinstance(meta, tuple) or meta[0] != "category_label":
+                    continue
+                depth = meta[2] if len(meta) > 2 else 0
+                if (depth or 0) == 0:
+                    continue
+                problem_cols = self._problem_columns_for_category(cat_item)
+                if problem_cols:
+                    root_id = meta[3] if len(meta) > 3 else meta[1]
+                    try:
+                        problem_roots.add(int(root_id))
+                    except Exception:
+                        pass
+
+            for row in range(root.rowCount()):
+                cat_item = root.child(row, 0)
+                if not cat_item:
+                    continue
+                meta = cat_item.data(Qt.ItemDataRole.UserRole)
+                if not meta or not isinstance(meta, tuple) or meta[0] != "category_label":
+                    continue
+                depth = meta[2] if len(meta) > 2 else 0
+                if (depth or 0) == 0:
+                    root_id = meta[1]
+                    try:
+                        root_id = int(root_id)
+                    except Exception:
+                        pass
+                    has_problem = root_id in problem_roots
+                    for col in range(self.model.columnCount()):
+                        item = root.child(row, col)
+                        if item:
+                            self._set_item_dim(item, not has_problem)
+                    continue
+
+                problem_cols = self._problem_columns_for_category(cat_item)
+                if problem_cols is None:
+                    continue
+                has_problem = bool(problem_cols)
+                for col in range(self.model.columnCount()):
+                    item = root.child(row, col)
+                    if not item:
+                        continue
+                    self._set_item_dim(item, not has_problem)
+                for rr in range(cat_item.rowCount()):
+                    for col in range(cat_item.columnCount()):
+                        item = cat_item.child(rr, col)
+                        if not item:
+                            continue
+                        if col >= 3:
+                            dim = col not in problem_cols
+                        else:
+                            dim = not has_problem
+                        self._set_item_dim(item, dim)
+        finally:
+            self._recalc_guard = previous_guard
+
+    def _restore_attention_filter(self):
+        if not hasattr(self, "model"):
+            return
+        root = self.model.invisibleRootItem()
+        previous_guard = self._recalc_guard
+        self._recalc_guard = True
+        try:
+            for row in range(root.rowCount()):
+                for col in range(self.model.columnCount()):
+                    item = root.child(row, col)
+                    if item and item.data(ATTN_DIM_ROLE) is not None:
+                        self._restore_item_style(item)
+                cat_item = root.child(row, 0)
+                if not cat_item:
+                    continue
+                for rr in range(cat_item.rowCount()):
+                    for col in range(cat_item.columnCount()):
+                        item = cat_item.child(rr, col)
+                        if item and item.data(ATTN_DIM_ROLE) is not None:
+                            self._restore_item_style(item)
+        finally:
+            self._recalc_guard = previous_guard
+
+    def _set_item_dim(self, item: QStandardItem, dim: bool):
+        if item is None:
+            return
+        self._ensure_item_style_base(item)
+        if not dim:
+            self._restore_item_style(item)
+            return
+        base_fore = item.data(ATTN_BASE_FORE_ROLE)
+        base_back = item.data(ATTN_BASE_BACK_ROLE)
+
+        dim_fore = self._dim_brush(base_fore, 25)
+        if dim_fore is None:
+            dim_fore = QBrush(QColor(0, 0, 0, 25))
+        item.setData(dim_fore, Qt.ItemDataRole.ForegroundRole)
+
+        dim_back = self._dim_brush(base_back, 15)
+        if dim_back is not None:
+            item.setData(dim_back, Qt.ItemDataRole.BackgroundRole)
+        item.setData(True, ATTN_DIM_ROLE)
+
+    def _restore_item_style(self, item: QStandardItem, clear_base: bool = False):
+        if item is None:
+            return
+        base_fore = item.data(ATTN_BASE_FORE_ROLE)
+        base_back = item.data(ATTN_BASE_BACK_ROLE)
+        item.setData(base_fore, Qt.ItemDataRole.ForegroundRole)
+        item.setData(base_back, Qt.ItemDataRole.BackgroundRole)
+        if clear_base:
+            item.setData(None, ATTN_BASE_FORE_ROLE)
+            item.setData(None, ATTN_BASE_BACK_ROLE)
+            item.setData(None, ATTN_DIM_ROLE)
+        else:
+            item.setData(False, ATTN_DIM_ROLE)
+
+    def _ensure_item_style_base(self, item: QStandardItem):
+        if item is None:
+            return
+        self._set_item_style_base(item)
+
+    def _set_item_style_base(self, item: QStandardItem, force: bool = False):
+        if item is None:
+            return
+        if force or item.data(ATTN_BASE_FORE_ROLE) is None:
+            item.setData(item.data(Qt.ItemDataRole.ForegroundRole), ATTN_BASE_FORE_ROLE)
+        if force or item.data(ATTN_BASE_BACK_ROLE) is None:
+            item.setData(item.data(Qt.ItemDataRole.BackgroundRole), ATTN_BASE_BACK_ROLE)
+
+    def _restore_attention_for_category(self, cat_item: QStandardItem):
+        if not hasattr(self, "model") or not cat_item:
+            return
+        root = self.model.invisibleRootItem()
+        row = cat_item.row()
+        for col in range(self.model.columnCount()):
+            item = root.child(row, col)
+            if item and item.data(ATTN_DIM_ROLE) is not None:
+                self._restore_item_style(item, clear_base=True)
+        for rr in range(cat_item.rowCount()):
+            for col in range(cat_item.columnCount()):
+                item = cat_item.child(rr, col)
+                if item and item.data(ATTN_DIM_ROLE) is not None:
+                    self._restore_item_style(item, clear_base=True)
+
+    def _refresh_attention_base_for_category(self, cat_item: QStandardItem):
+        if not hasattr(self, "model") or not cat_item:
+            return
+        root = self.model.invisibleRootItem()
+        row = cat_item.row()
+        for col in range(self.model.columnCount()):
+            item = root.child(row, col)
+            if item and item.data(ATTN_DIM_ROLE) is not None:
+                self._set_item_style_base(item, force=True)
+        for rr in range(cat_item.rowCount()):
+            for col in range(cat_item.columnCount()):
+                item = cat_item.child(rr, col)
+                if item and item.data(ATTN_DIM_ROLE) is not None:
+                    self._set_item_style_base(item, force=True)
+
+    def _dim_brush(self, brush, alpha: int):
+        if brush is None:
+            return None
+        color = brush.color() if isinstance(brush, QBrush) else QColor(brush)
+        dim_color = QColor(color)
+        dim_color.setAlpha(alpha)
+        return QBrush(dim_color)
+
+    def _problem_columns_for_category(self, cat_item: QStandardItem) -> set[int] | None:
+        diff_row_idx = None
+        for rr in range(cat_item.rowCount()):
+            label_item = cat_item.child(rr, 0)
+            if label_item and label_item.text() == "Diff":
+                diff_row_idx = rr
+                break
+        if diff_row_idx is None:
+            return None
+        problem_cols: set[int] = set()
+        for col in range(3, cat_item.columnCount()):
+            cell = cat_item.child(diff_row_idx, col)
+            if not cell:
+                continue
+            value = self._parse_amount_text(cell.text())
+            if value < -1e-6:
+                problem_cols.add(col)
+        return problem_cols
+
+    def _parse_amount_text(self, text: str) -> float:
+        cleaned = (text or "").replace(" ", "").replace(",", "")
+        if not cleaned:
+            return 0.0
+        try:
+            return float(cleaned)
+        except ValueError:
+            return 0.0
 
     def _update_partial_budget_months(self, header_names: list[str] | None = None):
         if not hasattr(self, "partial_budget_cb"):
@@ -2443,6 +2696,7 @@ class BudgetApp(QWidget):
         self.model.itemChanged.connect(self.on_item_changed)
         self.update_summary_chart()
         self._highlight_current_month_column()
+        self._apply_attention_filter()
 
     def update_summary_chart(self):
         totals = {
@@ -2690,6 +2944,8 @@ class BudgetApp(QWidget):
                     break
             if target is None:
                 return
+            if self._attention_filter_enabled:
+                self._restore_attention_for_category(target)
 
             header_ids = getattr(self, "header_ids", [])
             actual_map = getattr(self, "actual_map", {})
@@ -2829,6 +3085,9 @@ class BudgetApp(QWidget):
                 self.category_totals[cid] = {"actual": total_act, "budget": display_total}
                 self.update_summary_chart()
             self._update_summary_header()
+            if self._attention_filter_enabled:
+                self._refresh_attention_base_for_category(target)
+                self._apply_attention_filter()
         finally:
             self._recalc_guard = False
 
