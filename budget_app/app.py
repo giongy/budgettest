@@ -1280,13 +1280,15 @@ class BudgetApp(QWidget):
         self.accounts_cb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.accounts_cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.accounts_cb.setStyleSheet(
-            "QComboBox { background-color: #ffffff; } "
-            "QComboBox QAbstractItemView { background-color: #ffffff; color: #111; } "
+            "QComboBox { background-color: #fff7ed; border: 1px solid #fed7aa; border-radius: 4px; padding: 2px 6px; } "
+            "QComboBox QLineEdit { background-color: #fff7ed; } "
+            "QComboBox QAbstractItemView { background-color: #fff7ed; color: #111; selection-background-color: #fed7aa; selection-color: #111; } "
             "QComboBox QAbstractItemView::item { padding: 4px 6px; } "
             "QComboBox QAbstractItemView::indicator { width: 0px; height: 0px; border: none; background: transparent; }"
         )
         self.accounts_cb.lineEdit().setReadOnly(True)
         self.accounts_cb.lineEdit().setPlaceholderText("Seleziona conti")
+        self.accounts_cb.lineEdit().installEventFilter(self)
         self.accounts_cb.setMaxVisibleItems(12)
         self.accounts_cb.setModel(QStandardItemModel(self.accounts_cb))
         accounts_view = QListView(self.accounts_cb)
@@ -1383,9 +1385,15 @@ class BudgetApp(QWidget):
         self._update_db_label_text()
 
     def eventFilter(self, obj, event):
-        if hasattr(self, "accounts_cb") and obj == self.accounts_cb.view().viewport():
-            if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
-                return True
+        if hasattr(self, "accounts_cb"):
+            if obj == self.accounts_cb.view().viewport():
+                if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
+                    return True
+            if self.accounts_cb.isEditable() and self.accounts_cb.lineEdit() and obj == self.accounts_cb.lineEdit():
+                if event.type() == QEvent.Type.MouseButtonPress:
+                    if not self.accounts_cb.view().isVisible():
+                        self.accounts_cb.showPopup()
+                    return True
         return super().eventFilter(obj, event)
 
     def _set_db_path_label(self, path: Path | str | None):
